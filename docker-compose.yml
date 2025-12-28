@@ -1,0 +1,15 @@
+version: '3.8'
+services:
+  postgres:
+    image: postgres:15
+    ports: ["5432:5432"]
+    environment:
+      POSTGRES_DB: db
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: rocket69!
+  mongodb:
+    image: mongo:5.0
+    ports: ["27017:27017"]
+  redis:
+    image: redis:7
+    ports: ["6379:6379"]

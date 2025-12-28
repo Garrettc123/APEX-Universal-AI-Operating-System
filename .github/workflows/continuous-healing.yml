@@ -1,0 +1,10 @@
+name: Continuous Healing
+on:
+  schedule:
+    - cron: '0 * * * *'
+jobs:
+  heal:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: echo "🏥 Health check" && find . -name '*.json' | while read f; do python -m json.tool "$f" > /dev/null 2>&1 || echo "Issue: $f"; done
