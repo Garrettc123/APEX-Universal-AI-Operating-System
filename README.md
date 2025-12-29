@@ -185,7 +185,20 @@ impl QuantumDecisionEngine {
 git clone --recursive https://github.com/Garrettc123/APEX-Universal-AI-Operating-System.git
 cd APEX-Universal-AI-Operating-System
 
-# Initialize all 31 submodules
+# Install dependencies
+pip install -r requirements.txt
+
+# Run locally
+python main.py
+
+# Or run with Docker
+docker build -t apex-ai-os .
+docker run -p 8000:8000 apex-ai-os
+
+# Or use the deployment script
+./deploy-local.sh
+
+# Initialize all 31 submodules (for full deployment)
 ./scripts/init-apex.sh
 
 # Deploy consciousness layer
@@ -197,6 +210,27 @@ cd APEX-Universal-AI-Operating-System
 # Watch it work
 tail -f logs/apex-consciousness.log
 ```
+
+### Automated Deployment
+
+APEX includes a fully automated CI/CD pipeline that deploys on every push to main:
+
+```bash
+# The auto-deploy pipeline automatically:
+# 1. Builds Docker images
+# 2. Pushes to GitHub Container Registry
+# 3. Deploys to production environment
+# 4. Runs health checks
+# 5. Notifies on completion
+
+# Manual deployment trigger
+gh workflow run auto-deploy.yml
+
+# View deployment status
+gh run list --workflow=auto-deploy.yml
+```
+
+For detailed deployment documentation, see [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
 
 ### Configuration
 
