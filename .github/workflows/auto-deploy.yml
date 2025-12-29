@@ -64,6 +64,9 @@ jobs:
     needs: build-and-push
     if: github.ref == 'refs/heads/main'
 
+    permissions:
+      contents: read
+
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
