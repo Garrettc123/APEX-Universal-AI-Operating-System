@@ -33,9 +33,9 @@ echo "🚀 Starting container..."
 docker run -d \
     --name ${CONTAINER_NAME} \
     -p ${PORT}:8000 \
-    -e DATABASE_URL="${DATABASE_URL:-postgresql://localhost/db}" \
-    -e MONGODB_URI="${MONGODB_URI:-mongodb://localhost:27017}" \
-    -e REDIS_URL="${REDIS_URL:-redis://localhost:6379}" \
+    -e DATABASE_URL="${DATABASE_URL:-}" \
+    -e MONGODB_URI="${MONGODB_URI:-}" \
+    -e REDIS_URL="${REDIS_URL:-}" \
     ${IMAGE_NAME}:latest
 
 # Wait for the container to be healthy

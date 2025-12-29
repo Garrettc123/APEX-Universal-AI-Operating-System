@@ -17,16 +17,23 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
+# Create non-root user
+RUN useradd -m -u 1000 apex && \
+    chown -R apex:apex /app
+
 # Copy Python packages from builder
 COPY --from=builder /root/.local /root/.local
 
 # Copy application code
-COPY app.py .
-COPY main.py .
-COPY src/ ./src/
+COPY --chown=apex:apex app.py .
+COPY --chown=apex:apex main.py .
+COPY --chown=apex:apex src/ ./src/
 
 # Make sure scripts in .local are usable
 ENV PATH=/root/.local/bin:$PATH
+
+# Switch to non-root user
+USER apex
 
 # Expose port
 EXPOSE 8000
