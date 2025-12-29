@@ -2,7 +2,7 @@ name: Auto Deploy Pipeline
 
 on:
   push:
-    branches: [ main ]
+    branches: [main]
   workflow_dispatch:
 
 env:
@@ -48,8 +48,10 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache
-          cache-to: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache,mode=max
+          cache-from: |
+            type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache
+          cache-to: |
+            type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache,mode=max
 
       - name: Output image info
         run: |
@@ -72,7 +74,7 @@ jobs:
           echo "Image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest"
           echo "Environment: Production"
           echo "Status: Deployment successful"
-          
+
           # Create deployment manifest
           cat > deployment.yaml << EOF
           apiVersion: apps/v1
@@ -138,9 +140,9 @@ jobs:
             selector:
               app: apex-ai-os
           EOF
-          
+
           echo "✅ Deployment manifest created"
-          
+
           # In a real deployment, you would apply this with:
           # kubectl apply -f deployment.yaml
           # or use your preferred deployment method (Helm, ArgoCD, etc.)
