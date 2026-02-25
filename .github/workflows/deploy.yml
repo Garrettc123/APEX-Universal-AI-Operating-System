@@ -1,20 +1,16 @@
-name: Auto-Deploy APEX OS
-on: [push]
+# DISABLED: This workflow is superseded by ci-cd-pipeline.yml
+# The docker-build job in ci-cd-pipeline.yml handles all build & deploy.
+# This file is kept for reference only and will NOT trigger any runs.
+# on: {} disables all triggers.
+
+name: Auto-Deploy APEX OS (DISABLED - see ci-cd-pipeline.yml)
+
+on: {}  # No triggers - workflow disabled
+
 jobs:
-  build-and-test:
+  disabled:
     runs-on: ubuntu-latest
+    if: false  # Never runs
     steps:
-      - uses: actions/checkout@v3
-      - name: Setup Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.11'
-      - name: Install dependencies
-        run: |
-          pip install --upgrade pip
-          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
-      - name: Run Tests
-        run: |
-          if [ -f pytest.ini ]; then pytest; else echo "No tests defined"; fi
-      - name: Deployment Status
-        run: echo "✅ APEX AI OS Verified & Ready"
+      - name: This job never runs
+        run: echo "Use ci-cd-pipeline.yml instead"
