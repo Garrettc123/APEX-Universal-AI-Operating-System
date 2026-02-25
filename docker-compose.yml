@@ -1,15 +1,62 @@
 version: '3.8'
+
+# FIX: All credentials loaded from .env file - copy .env.example to .env and fill in values
+# Never commit plaintext passwords. Run: cp .env.example .env && edit .env
+
 services:
   postgres:
     image: postgres:15
-    ports: ["5432:5432"]
+    restart: unless-stopped
+    ports:
+      - "5432:5432"
     environment:
-      POSTGRES_DB: db
-      POSTGRES_USER: user
-      POSTGRES_PASSWORD: rocket69!
+      POSTGRES_DB: ${POSTGRES_DB:-db}
+      POSTGRES_USER: ${POSTGRES_USER:-user}
+      # FIX: Password loaded from env var, not hardcoded
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}
+    # FIX: Named volume ensures data persists across docker-compose down/up
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-user} -d ${POSTGRES_DB:-db}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   mongodb:
     image: mongo:5.0
-    ports: ["27017:27017"]
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_USER:-admin}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_PASSWORD:?MONGO_PASSWORD must be set in .env}
+    # FIX: Named volume for persistent MongoDB data
+    volumes:
+      - mongo_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   redis:
     image: redis:7
-    ports: ["6379:6379"]
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    command: redis-server --requirepass ${REDIS_PASSWORD:?REDIS_PASSWORD must be set in .env}
+    # FIX: Named volume for Redis persistence (AOF/RDB survives restarts)
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+# FIX: Declare all named volumes so Docker manages them as persistent
+volumes:
+  postgres_data:
+  mongo_data:
+  redis_data:
