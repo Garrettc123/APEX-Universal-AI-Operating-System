@@ -4,12 +4,17 @@ on:
     workflows: ['CI/CD Pipeline']
     types: [completed]
   schedule:
-    - cron: '0 */4 * * *'
+    - cron: '0 7 * * *'  # Daily health check at 7am UTC
   workflow_dispatch:
 jobs:
   repair:
     runs-on: ubuntu-latest
     steps:
+      - name: Check secrets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if [ -z "$GH_TOKEN" ]; then echo "⚠️ Secret not set, skipping"; exit 0; fi
       - uses: actions/checkout@v4
         with:
           token: ${{ secrets.GITHUB_TOKEN }}

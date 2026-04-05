@@ -12,6 +12,11 @@ jobs:
       pull-requests: write
       contents: write
     steps:
+      - name: Check secrets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if [ -z "$GH_TOKEN" ]; then echo "⚠️ Secret not set, skipping"; exit 0; fi
       - name: Auto-merge ready PRs
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

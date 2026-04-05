@@ -9,6 +9,7 @@ on:
     branches: [ main, develop ]
   schedule:
     - cron: '0 0 * * 0'  # Weekly Sunday midnight - dependency/security scan
+  workflow_dispatch:
 
 env:
   PYTHON_VERSION: '3.11'
@@ -95,6 +96,11 @@ jobs:
       contents: read
       packages: write
     steps:
+      - name: Check secrets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if [ -z "$GH_TOKEN" ]; then echo "⚠️ Secret not set, skipping"; exit 0; fi
       - uses: actions/checkout@v4
 
       - name: Set up Docker Buildx
