@@ -3,8 +3,11 @@
 Run with: python main.py
 Or via Docker CMD: python -m uvicorn app:app --host 0.0.0.0 --port 8000
 """
+
 import os
+
 import uvicorn
+
 from app import app  # noqa: F401 - import ensures app is configured
 
 if __name__ == "__main__":

@@ -1,6 +1,7 @@
 name: APEX CI/CD Pipeline
-# This is the CANONICAL pipeline. All other workflow files (ci.yml, ci-cd.yml,
-# auto-deploy.yml, deploy.yml) have been disabled - see those files for details.
+# This is the CANONICAL pipeline. Legacy workflow files (ci.yml, ci-cd.yml,
+# auto-deploy.yml, deploy.yml) have been removed — they used on: {} which
+# created ghost failed runs.
 
 on:
   push:
@@ -22,10 +23,10 @@ jobs:
     name: Code Quality Checks
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: ${{ env.PYTHON_VERSION }}
           cache: 'pip'
@@ -63,10 +64,10 @@ jobs:
       matrix:
         python-version: ['3.10', '3.11', '3.12']
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.python-version }}
           cache: 'pip'
@@ -97,16 +98,19 @@ jobs:
       packages: write
     steps:
       - name: Check secrets
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        id: secrets-check
         run: |
-          if [ -z "$GH_TOKEN" ]; then echo "⚠️ Secret not set, skipping"; exit 0; fi
-      - uses: actions/checkout@v4
+          echo "has_token=${{ secrets.GITHUB_TOKEN != '' }}" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v5
+        if: steps.secrets-check.outputs.has_token == 'true'
 
       - name: Set up Docker Buildx
+        if: steps.secrets-check.outputs.has_token == 'true'
         uses: docker/setup-buildx-action@v3
 
       - name: Log in to Container Registry
+        if: steps.secrets-check.outputs.has_token == 'true'
         uses: docker/login-action@v3
         with:
           registry: ${{ env.DOCKER_REGISTRY }}
@@ -114,6 +118,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build and push
+        if: steps.secrets-check.outputs.has_token == 'true'
         uses: docker/build-push-action@v5
         with:
           context: .

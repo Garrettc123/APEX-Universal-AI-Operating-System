@@ -11,25 +11,35 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Check secrets
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        id: secrets-check
         run: |
-          if [ -z "$GH_TOKEN" ]; then echo "⚠️ Secret not set, skipping"; exit 0; fi
-      - uses: actions/checkout@v4
+          echo "has_token=${{ secrets.GITHUB_TOKEN != '' }}" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v5
+        if: steps.secrets-check.outputs.has_token == 'true'
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
+        if: steps.secrets-check.outputs.has_token == 'true'
         with:
           python-version: '3.11'
-      - run: pip install black flake8 isort mypy 2>/dev/null || true
-      - run: |
+      - name: Install linters
+        if: steps.secrets-check.outputs.has_token == 'true'
+        run: pip install black flake8 isort mypy 2>/dev/null || true
+      - name: Auto-format
+        if: steps.secrets-check.outputs.has_token == 'true'
+        run: |
           black . 2>/dev/null || true
           isort . 2>/dev/null || true
           [ ! -f pytest.ini ] && echo '[pytest]' > pytest.ini
-      - run: |
+      - name: Run tests
+        if: steps.secrets-check.outputs.has_token == 'true'
+        run: |
           pip install -r requirements.txt 2>/dev/null || true
           for i in {1..3}; do pytest 2>&1 && break; sleep 5; done
-      - run: |
+      - name: Commit repairs
+        if: steps.secrets-check.outputs.has_token == 'true'
+        run: |
           git config user.name "AI Repair"
           git config user.email "repair@bot.local"
           if [ -n "$(git status --porcelain)" ]; then

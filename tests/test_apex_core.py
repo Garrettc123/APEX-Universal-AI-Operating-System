@@ -1,6 +1,8 @@
 """Tests for APEX Core Orchestrator"""
-import pytest
+
 import numpy as np
+import pytest
+
 from src.apex_core import (
     APEXOrchestrator,
     AutonomousRevenueEngine,
