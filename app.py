@@ -1,4 +1,5 @@
 import os
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -26,4 +27,6 @@ async def root():
 @app.get("/health")
 async def health():
     return {"status": "healthy"}
+
+
 # NOTE: Entrypoint is in main.py - no duplicate uvicorn block here
