@@ -1,0 +1,5 @@
+<resources>
+    <color name="apex_background">#0D1117</color>
+    <color name="apex_surface">#161B22</color>
+    <color name="apex_accent">#2EA043</color>
+</resources>

@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Stylized apex "peak" mark centered in the 72dp safe zone. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#2EA043"
+        android:pathData="M54,30 L74,72 L62,72 L54,54 L46,72 L34,72 Z" />
+    <path
+        android:fillColor="#1F6FEB"
+        android:pathData="M54,44 L62,62 L46,62 Z" />
+</vector>
