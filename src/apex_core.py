@@ -5,11 +5,13 @@ Autonomous revenue generation, zero-human oversight.
 """
 
 import asyncio
+import json
 import logging
+import os
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 import numpy as np
 import scipy.sparse as sp
@@ -81,7 +83,7 @@ class NeuralFusionEngine:
 class AutonomousRevenueEngine:
     """Generates revenue autonomously through multiple strategies"""
 
-    def __init__(self):
+    def __init__(self, state_file: Optional[str] = None):
         self.total_revenue = 0.0
         self.strategies = {
             "ai_services": {"rate": 1000, "clients": 0},
@@ -92,6 +94,46 @@ class AutonomousRevenueEngine:
         }
         # FIX: Track monthly revenue in a rolling dict for accurate projections
         self._monthly_revenue: Dict[str, float] = {}
+
+        # Optional file-based persistence so revenue state survives restarts.
+        # Falls back to the APEX_STATE_FILE env var when not passed explicitly.
+        self.state_file = state_file or os.getenv("APEX_STATE_FILE")
+        if self.state_file:
+            self.load()
+
+    def load(self) -> bool:
+        """Load persisted revenue state from disk. Returns True if loaded."""
+        if not self.state_file or not os.path.exists(self.state_file):
+            return False
+        try:
+            with open(self.state_file, "r", encoding="utf-8") as fh:
+                data = json.load(fh)
+        except (OSError, ValueError) as exc:
+            logger.warning(f"Could not load revenue state from {self.state_file}: {exc}")
+            return False
+
+        self.total_revenue = float(data.get("total_revenue", 0.0))
+        self._monthly_revenue = {str(k): float(v) for k, v in data.get("monthly_revenue", {}).items()}
+        saved_strategies = data.get("strategies", {})
+        for name, cfg in saved_strategies.items():
+            if name in self.strategies:
+                self.strategies[name]["clients"] = int(cfg.get("clients", 0))
+        logger.info(f"Loaded revenue state: total=${self.total_revenue:,.2f}")
+        return True
+
+    def save(self) -> None:
+        """Persist revenue state to disk (atomic write). No-op if unconfigured."""
+        if not self.state_file:
+            return
+        data = {
+            "total_revenue": self.total_revenue,
+            "monthly_revenue": self._monthly_revenue,
+            "strategies": {name: {"clients": cfg["clients"]} for name, cfg in self.strategies.items()},
+        }
+        tmp = f"{self.state_file}.tmp"
+        with open(tmp, "w", encoding="utf-8") as fh:
+            json.dump(data, fh, indent=2)
+        os.replace(tmp, self.state_file)
 
     def _month_key(self) -> str:
         now = datetime.now()
@@ -117,6 +159,9 @@ class AutonomousRevenueEngine:
         # Accumulate into the current month bucket
         key = self._month_key()
         self._monthly_revenue[key] = self._monthly_revenue.get(key, 0.0) + cycle_revenue
+
+        # Persist state (no-op unless a state file is configured)
+        self.save()
 
         return cycle_revenue
 

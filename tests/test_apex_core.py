@@ -105,6 +105,34 @@ class TestAutonomousRevenueEngine:
         expected = (2_000.0 + 3_000.0 + 4_000.0) / 3 * 12
         assert projection == pytest.approx(expected)
 
+    def test_save_and_load_roundtrip(self, tmp_path):
+        """State persisted by one engine is restored by another."""
+        state_file = str(tmp_path / "state.json")
+        engine = AutonomousRevenueEngine(state_file=state_file)
+        engine.total_revenue = 42_000.0
+        engine._monthly_revenue["2026-01"] = 42_000.0
+        engine.strategies["ai_services"]["clients"] = 7
+        engine.save()
+
+        restored = AutonomousRevenueEngine(state_file=state_file)
+        assert restored.total_revenue == pytest.approx(42_000.0)
+        assert restored._monthly_revenue["2026-01"] == pytest.approx(42_000.0)
+        assert restored.strategies["ai_services"]["clients"] == 7
+
+    def test_save_is_noop_without_state_file(self):
+        """save() must not raise when no state file is configured."""
+        engine = AutonomousRevenueEngine()
+        engine.save()  # should simply do nothing
+
+    async def test_generate_revenue_persists(self, tmp_path):
+        """A revenue cycle writes the state file when configured."""
+        import os
+
+        state_file = str(tmp_path / "rev.json")
+        engine = AutonomousRevenueEngine(state_file=state_file)
+        await engine.generate_revenue()
+        assert os.path.exists(state_file)
+
 
 class TestAPEXOrchestrator:
     """Test APEXOrchestrator"""

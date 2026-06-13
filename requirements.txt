@@ -1,6 +1,13 @@
-numpy>=1.24.0
-asyncio>=3.4.3
-python-dateutil>=2.8.0
-fastapi>=0.104.0
-uvicorn[standard]>=0.24.0
-scipy>=1.11.0
+# Pinned with compatible-release upper bounds to keep CI reproducible across
+# Python 3.10-3.12 while still receiving patch updates.
+# NOTE: the old `asyncio>=3.4.3` PyPI entry was removed — asyncio is part of the
+# standard library, and that backport package is broken/unnecessary on Py3.10+.
+numpy>=1.24.0,<3.0.0
+python-dateutil>=2.8.0,<3.0.0
+fastapi>=0.104.0,<1.0.0
+uvicorn[standard]>=0.24.0,<1.0.0
+scipy>=1.11.0,<2.0.0
+pydantic>=2.0.0,<3.0.0
+
+# Optional: required only to enable live Stripe checkout (see src/billing.py).
+# stripe>=8.0.0,<13.0.0
