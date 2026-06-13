@@ -4,6 +4,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from src.dashboard_api import router as dashboard_router
+from src.integrations_api import router as integrations_router
 
 app = FastAPI(title="APEX AI OS", version="1.0.0")
 
@@ -21,8 +22,10 @@ app.add_middleware(
 )
 
 
-# Mobile command dashboard API (consumed by the native Android app in android/)
+# Mobile command dashboard + integrations hub APIs (consumed by the native
+# Android app in android/)
 app.include_router(dashboard_router)
+app.include_router(integrations_router)
 
 
 @app.get("/")

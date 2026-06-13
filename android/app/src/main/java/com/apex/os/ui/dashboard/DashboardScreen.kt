@@ -1,7 +1,6 @@
 package com.apex.os.ui.dashboard
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -20,31 +19,18 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoGraph
 import androidx.compose.material.icons.filled.Bolt
-import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -64,86 +50,30 @@ import com.apex.os.ui.theme.ApexSurface
 import com.apex.os.ui.theme.ApexTextSecondary
 import java.util.Locale
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun DashboardScreen(viewModel: DashboardViewModel) {
+fun DashboardScreen(viewModel: DashboardViewModel, contentPadding: PaddingValues) {
     val state by viewModel.state.collectAsStateWithLifecycle()
-    var showSettings by rememberSaveable { mutableStateOf(false) }
 
-    Scaffold(
-        containerColor = MaterialTheme.colorScheme.background,
-        topBar = {
-            TopAppBar(
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.background,
-                    titleContentColor = MaterialTheme.colorScheme.onBackground,
-                ),
-                title = {
-                    Column {
-                        Text("APEX OS", fontWeight = FontWeight.Bold)
-                        state.overview?.let {
-                            Text(
-                                "${it.state.uppercase(Locale.US)} · ${it.evolutionCycles} cycles · up ${formatUptime(it.uptimeSeconds)}",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = ApexTextSecondary,
-                            )
-                        }
-                    }
-                },
-                actions = {
-                    IconButton(onClick = { viewModel.refresh() }) {
-                        Icon(Icons.Filled.Refresh, contentDescription = "Refresh")
-                    }
-                    IconButton(onClick = { showSettings = true }) {
-                        Icon(Icons.Filled.Settings, contentDescription = "Settings")
-                    }
-                },
-            )
-        },
-    ) { padding ->
-        when {
-            state.loading -> CenteredLoader(padding)
-            else -> DashboardContent(state, viewModel, padding)
+    if (state.loading) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(contentPadding),
+            contentAlignment = Alignment.Center,
+        ) {
+            CircularProgressIndicator(color = ApexAccentGreen)
         }
+        return
     }
 
-    if (showSettings) {
-        BackendUrlDialog(
-            current = state.baseUrl,
-            onDismiss = { showSettings = false },
-            onSave = {
-                viewModel.updateBaseUrl(it)
-                showSettings = false
-            },
-        )
-    }
-}
-
-@Composable
-private fun CenteredLoader(padding: PaddingValues) {
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(padding),
-        contentAlignment = Alignment.Center,
-    ) {
-        CircularProgressIndicator(color = ApexAccentGreen)
-    }
-}
-
-@Composable
-private fun DashboardContent(
-    state: DashboardUiState,
-    viewModel: DashboardViewModel,
-    padding: PaddingValues,
-) {
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
-            .padding(padding),
+            .padding(contentPadding),
         contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
+        state.overview?.let { item { StatusHeader(it) } }
         state.error?.let { item { ErrorBanner(it) } }
 
         state.overview?.let { ov ->
@@ -160,6 +90,23 @@ private fun DashboardContent(
             )
         }
         items(state.systems, key = { it.name }) { row -> SystemCard(row) }
+    }
+}
+
+@Composable
+private fun StatusHeader(ov: Overview) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Box(
+            modifier = Modifier
+                .size(9.dp)
+                .background(ApexAccentGreen, RoundedCornerShape(50)),
+        )
+        Spacer(Modifier.width(8.dp))
+        Text(
+            "${ov.state.uppercase(Locale.US)} · ${ov.evolutionCycles} cycles · up ${formatUptime(ov.uptimeSeconds)}",
+            style = MaterialTheme.typography.labelMedium,
+            color = ApexTextSecondary,
+        )
     }
 }
 
@@ -380,39 +327,6 @@ private fun StatusDot(color: Color, status: String) {
             color = ApexTextSecondary,
         )
     }
-}
-
-@Composable
-private fun BackendUrlDialog(
-    current: String,
-    onDismiss: () -> Unit,
-    onSave: (String) -> Unit,
-) {
-    var text by remember { mutableStateOf(current) }
-    androidx.compose.material3.AlertDialog(
-        onDismissRequest = onDismiss,
-        containerColor = ApexSurface,
-        title = { Text("Backend URL") },
-        text = {
-            Column {
-                Text(
-                    "Point the app at your APEX backend. Use http://10.0.2.2:8000/ for a server running on this machine via the emulator.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = ApexTextSecondary,
-                )
-                Spacer(Modifier.height(12.dp))
-                OutlinedTextField(
-                    value = text,
-                    onValueChange = { text = it },
-                    singleLine = true,
-                    label = { Text("https://your-backend/") },
-                    modifier = Modifier.fillMaxWidth(),
-                )
-            }
-        },
-        confirmButton = { TextButton(onClick = { onSave(text) }) { Text("Save") } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
-    )
 }
 
 // -- formatting helpers -------------------------------------------------------

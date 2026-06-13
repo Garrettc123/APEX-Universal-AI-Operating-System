@@ -1,5 +1,8 @@
 package com.apex.os.data
 
+import com.apex.os.data.model.Integration
+import com.apex.os.data.model.IntegrationDetail
+import com.apex.os.data.model.IntegrationRun
 import com.apex.os.data.model.Overview
 import com.apex.os.data.model.Revenue
 import com.apex.os.data.model.SystemRow
@@ -61,4 +64,9 @@ class ApexRepository(private val settings: SettingsStore) {
     suspend fun evolve(): Overview = api().evolve()
     suspend fun optimize(): Overview = api().optimize()
     suspend fun runRevenueCycle(): Revenue = api().runRevenueCycle()
+
+    suspend fun integrations(): List<Integration> = api().integrations()
+    suspend fun integration(id: String): IntegrationDetail = api().integration(id)
+    suspend fun triggerIntegration(id: String): IntegrationRun =
+        api().triggerIntegration(id)
 }

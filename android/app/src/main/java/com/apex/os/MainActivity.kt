@@ -8,15 +8,21 @@ import androidx.activity.viewModels
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Surface
 import androidx.compose.ui.Modifier
-import com.apex.os.ui.dashboard.DashboardScreen
+import com.apex.os.ui.AppShell
 import com.apex.os.ui.dashboard.DashboardViewModel
+import com.apex.os.ui.integrations.IntegrationsViewModel
 import com.apex.os.ui.theme.ApexTheme
 
 class MainActivity : ComponentActivity() {
 
-    private val viewModel: DashboardViewModel by viewModels {
+    private val dashboardViewModel: DashboardViewModel by viewModels {
         val app = application as ApexApplication
         DashboardViewModel.Factory(app.repository, app.settings)
+    }
+
+    private val integrationsViewModel: IntegrationsViewModel by viewModels {
+        val app = application as ApexApplication
+        IntegrationsViewModel.Factory(app.repository, app.settings)
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -25,7 +31,7 @@ class MainActivity : ComponentActivity() {
         setContent {
             ApexTheme {
                 Surface(modifier = Modifier.fillMaxSize()) {
-                    DashboardScreen(viewModel)
+                    AppShell(dashboardViewModel, integrationsViewModel)
                 }
             }
         }

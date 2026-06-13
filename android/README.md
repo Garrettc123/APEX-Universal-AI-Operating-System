@@ -5,16 +5,28 @@ Operating System into a personal, GitHub-Mobile-style command center on your
 phone. It connects to the APEX FastAPI backend and lets you watch and drive
 your whole business infrastructure from one screen.
 
-## What it does (V1)
+## What it does
 
+A bottom-nav shell with three tabs:
+
+**Command** (dashboard)
 - **Live KPI cards** — intelligence level, healthy-vs-total systems, total
   revenue, and annual projection.
 - **Systems list** — every managed system with a color-coded health bar
   (worst health surfaced first), status, and performance.
 - **One-tap cycles** — trigger an **Evolve**, **Optimize**, or **Revenue**
   cycle on the backend and watch every card update.
-- **Repointable backend** — set your own backend URL in Settings (gear icon)
-  so the app can talk to a local server or a deployed one.
+
+**Integrations** (hub)
+- Every service you own (Gmail, Notion, Shopify, Slack, Airtable, Vercel,
+  GitHub, Stripe, Zapier…) in one list, connected-first, with status and
+  automation counts.
+- **Run** any connected integration to trigger a sync/automation pass; the
+  result and last-sync time update inline.
+
+**Settings**
+- Repoint the app at your own backend URL (local or deployed); saving reloads
+  every screen against it.
 
 ## Architecture
 
@@ -43,6 +55,13 @@ Endpoints added to the FastAPI app in this repo (`src/dashboard_api.py`):
 | POST   | `/api/cycle/evolve`   | Run one self-evolution cycle         |
 | POST   | `/api/cycle/optimize` | Run one optimization pass            |
 | POST   | `/api/cycle/revenue`  | Run one revenue-generation cycle     |
+| GET    | `/api/integrations`         | List all integrations          |
+| GET    | `/api/integrations/{id}`    | One integration + recent runs  |
+| POST   | `/api/integrations/{id}/trigger` | Trigger a sync/automation |
+
+A GitHub Actions workflow (`.github/workflows/android-build.yml`) assembles a
+debug APK on every push that touches `android/` and uploads it as a build
+artifact.
 
 Run the backend from the repo root:
 
