@@ -1,0 +1,131 @@
+name: MARS Master — Deploy + Log
+
+# Deploys MARS API to Render on every push to main, verifies health, then logs
+# the deploy to Notion and opens a Linear issue. Copy this into the mars-api
+# repo at .github/workflows/github-actions-master.yml.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: mars-deploy-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    name: Deploy to Render
+    runs-on: ubuntu-latest
+    outputs:
+      service_url: ${{ steps.trigger.outputs.service_url }}
+    steps:
+      - name: Trigger Render deploy
+        id: trigger
+        env:
+          RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+          RENDER_SERVICE_ID: ${{ secrets.RENDER_SERVICE_ID }}
+        run: |
+          set -euo pipefail
+          if [ -z "${RENDER_API_KEY:-}" ] || [ -z "${RENDER_SERVICE_ID:-}" ]; then
+            echo "::error::RENDER_API_KEY and RENDER_SERVICE_ID secrets are required."
+            exit 1
+          fi
+          echo "Triggering deploy for $RENDER_SERVICE_ID"
+          resp=$(curl -fsS -X POST \
+            "https://api.render.com/v1/services/${RENDER_SERVICE_ID}/deploys" \
+            -H "Authorization: Bearer ${RENDER_API_KEY}" \
+            -H "Content-Type: application/json" \
+            -d '{"clearCache":"do_not_clear"}')
+          echo "Deploy requested: $resp"
+          svc=$(curl -fsS \
+            "https://api.render.com/v1/services/${RENDER_SERVICE_ID}" \
+            -H "Authorization: Bearer ${RENDER_API_KEY}")
+          url=$(echo "$svc" | python3 -c "import sys,json;print(json.load(sys.stdin).get('serviceDetails',{}).get('url',''))")
+          echo "service_url=$url" >> "$GITHUB_OUTPUT"
+
+  healthcheck:
+    name: Verify /health
+    needs: deploy
+    runs-on: ubuntu-latest
+    steps:
+      - name: Poll health endpoint
+        env:
+          SERVICE_URL: ${{ needs.deploy.outputs.service_url }}
+        run: |
+          set -euo pipefail
+          if [ -z "${SERVICE_URL:-}" ]; then
+            echo "::warning::No service URL resolved; skipping health check."
+            exit 0
+          fi
+          echo "Waiting for ${SERVICE_URL}/health ..."
+          for i in $(seq 1 30); do
+            code=$(curl -s -o /dev/null -w "%{http_code}" "${SERVICE_URL}/health" || true)
+            if [ "$code" = "200" ]; then
+              echo "Healthy after ${i} attempts."
+              exit 0
+            fi
+            echo "Attempt ${i}: HTTP ${code}; retrying in 10s"
+            sleep 10
+          done
+          echo "::error::Service did not return 200 within timeout."
+          exit 1
+
+  log-notion:
+    name: Log deploy to Notion
+    needs: [deploy, healthcheck]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install requests
+      - name: Append deploy record
+        env:
+          NOTION_API_KEY: ${{ secrets.NOTION_API_KEY }}
+          NOTION_DEPLOY_DB_ID: ${{ secrets.NOTION_DEPLOY_DB_ID }}
+          SERVICE_URL: ${{ needs.deploy.outputs.service_url }}
+          GIT_SHA: ${{ github.sha }}
+        run: |
+          python3 - <<'PY'
+          import os, requests, datetime
+          key = os.getenv("NOTION_API_KEY"); db = os.getenv("NOTION_DEPLOY_DB_ID")
+          if not (key and db):
+              print("Notion deploy logging not configured; skipping."); raise SystemExit(0)
+          requests.post(
+              "https://api.notion.com/v1/pages",
+              headers={"Authorization": f"Bearer {key}",
+                       "Notion-Version": "2022-06-28",
+                       "Content-Type": "application/json"},
+              json={"parent": {"database_id": db},
+                    "properties": {
+                        "Name": {"title": [{"text": {"content":
+                            f"Deploy {os.getenv('GIT_SHA','')[:7]}"}}]},
+                    }},
+              timeout=30).raise_for_status()
+          print("Logged deploy to Notion.")
+          PY
+
+  linear-issue:
+    name: Open Linear deploy issue
+    needs: [deploy, healthcheck]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create issue
+        env:
+          LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
+          LINEAR_TEAM_ID: ${{ secrets.LINEAR_TEAM_ID }}
+          GIT_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          if [ -z "${LINEAR_API_KEY:-}" ] || [ -z "${LINEAR_TEAM_ID:-}" ]; then
+            echo "::warning::Linear secrets not set; skipping."; exit 0
+          fi
+          curl -fsS -X POST https://api.linear.app/graphql \
+            -H "Authorization: ${LINEAR_API_KEY}" \
+            -H "Content-Type: application/json" \
+            -d "{\"query\":\"mutation(\$t:String!,\$tm:String!){issueCreate(input:{title:\$t,teamId:\$tm}){success}}\",\"variables\":{\"t\":\"Deploy ${GIT_SHA:0:7} shipped\",\"tm\":\"${LINEAR_TEAM_ID}\"}}"

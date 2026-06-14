@@ -1,0 +1,38 @@
+name: Dashboard Update (daily)
+
+# Runs scripts/update_dashboard.py to refresh the Notion Unified Revenue
+# Dashboard from Stripe / Linear / Apollo. Copy into mars-api at
+# .github/workflows/dashboard-update.yml.
+
+on:
+  schedule:
+    # 11:00 UTC == 06:00 America/Chicago (CDT). GitHub cron is always UTC.
+    - cron: "0 11 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  update:
+    name: Refresh Notion dashboard
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install requests
+
+      - name: Run dashboard updater
+        env:
+          STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
+          LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
+          LINEAR_TEAM_ID: ${{ secrets.LINEAR_TEAM_ID }}
+          NOTION_API_KEY: ${{ secrets.NOTION_API_KEY }}
+          NOTION_DASHBOARD_PAGE_ID: ${{ secrets.NOTION_DASHBOARD_PAGE_ID }}
+          APOLLO_API_KEY: ${{ secrets.APOLLO_API_KEY }}
+        run: python3 scripts/update_dashboard.py
