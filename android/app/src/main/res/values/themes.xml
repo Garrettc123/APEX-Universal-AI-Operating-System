@@ -1,0 +1,10 @@
+<resources>
+    <!-- Base theme; the Compose Material3 theme drives actual colors. This
+         keeps the splash/window background dark to avoid a white flash. -->
+    <style name="Theme.ApexOS" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/apex_background</item>
+        <item name="android:statusBarColor">@color/apex_background</item>
+        <item name="android:navigationBarColor">@color/apex_background</item>
+        <item name="android:windowLightStatusBar">false</item>
+    </style>
+</resources>

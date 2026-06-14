@@ -3,6 +3,9 @@ import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from src.dashboard_api import router as dashboard_router
+from src.integrations_api import router as integrations_router
+
 app = FastAPI(title="APEX AI OS", version="1.0.0")
 
 # FIX: Load allowed origins from env var instead of wildcard "*"
@@ -17,6 +20,12 @@ app.add_middleware(
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type", "X-Request-ID"],
 )
+
+
+# Mobile command dashboard + integrations hub APIs (consumed by the native
+# Android app in android/)
+app.include_router(dashboard_router)
+app.include_router(integrations_router)
 
 
 @app.get("/")
