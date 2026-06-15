@@ -30,3 +30,25 @@ def test_missing_price_id_raises(monkeypatch):
     monkeypatch.delenv("STRIPE_PRICE_STARTER", raising=False)
     with pytest.raises(billing.BillingNotConfigured):
         billing.create_checkout_session("starter")
+
+
+def test_webhook_not_configured(monkeypatch):
+    monkeypatch.delenv("STRIPE_WEBHOOK_SECRET", raising=False)
+    assert billing.webhook_configured() is False
+    with pytest.raises(billing.BillingNotConfigured):
+        billing.verify_webhook(b"{}", "sig")
+
+
+def test_handle_event_handled():
+    result = billing.handle_event({"type": "checkout.session.completed", "data": {"object": {"customer": "cus_1"}}})
+    assert result == {"status": "handled", "type": "checkout.session.completed"}
+
+
+def test_handle_event_payment_failed():
+    result = billing.handle_event({"type": "invoice.payment_failed", "data": {"object": {"customer": "cus_2"}}})
+    assert result["status"] == "handled"
+
+
+def test_handle_event_ignored():
+    result = billing.handle_event({"type": "some.other.event", "data": {"object": {}}})
+    assert result == {"status": "ignored", "type": "some.other.event"}

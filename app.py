@@ -1,11 +1,14 @@
 import os
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from src import billing, pricing
 from src.apex_core import AutonomousRevenueEngine
+
+STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
 
 app = FastAPI(title="APEX AI OS", version="1.0.0")
 
@@ -55,6 +58,12 @@ async def get_pricing():
     }
 
 
+@app.get("/store", include_in_schema=False)
+async def store():
+    """Serve the minimal checkout front-end."""
+    return FileResponse(os.path.join(STATIC_DIR, "index.html"))
+
+
 @app.post("/api/checkout")
 async def create_checkout(req: CheckoutRequest):
     """Create a Stripe Checkout Session for a purchasable plan.
@@ -68,6 +77,24 @@ async def create_checkout(req: CheckoutRequest):
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except billing.BillingNotConfigured as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+@app.post("/api/webhooks/stripe")
+async def stripe_webhook(request: Request):
+    """Receive and process Stripe webhook events.
+
+    Returns 503 when webhooks are not configured and 400 when signature
+    verification fails.
+    """
+    payload = await request.body()
+    sig_header = request.headers.get("stripe-signature", "")
+    try:
+        event = billing.verify_webhook(payload, sig_header)
+    except billing.BillingNotConfigured as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except billing.WebhookError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return billing.handle_event(event)
 
 
 @app.get("/api/status")

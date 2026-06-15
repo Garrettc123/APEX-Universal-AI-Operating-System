@@ -16,10 +16,13 @@ To go live:
   4. (optional) export CHECKOUT_SUCCESS_URL / CHECKOUT_CANCEL_URL
 """
 
+import logging
 import os
 from typing import Optional
 
 from .pricing import Plan, get_plan
+
+logger = logging.getLogger(__name__)
 
 
 class BillingError(Exception):
@@ -32,6 +35,10 @@ class BillingNotConfigured(BillingError):
 
 class UnknownPlan(BillingError):
     """Raised when a checkout is requested for a plan that does not exist."""
+
+
+class WebhookError(BillingError):
+    """Raised when a Stripe webhook payload fails verification/parsing."""
 
 
 def is_configured() -> bool:
@@ -83,3 +90,75 @@ def create_checkout_session(plan_id: str) -> dict:
         cancel_url=_cancel_url(),
     )
     return {"id": session["id"], "url": session["url"], "plan": plan.id}
+
+
+# ── Webhooks ─────────────────────────────────────────────────────────────────
+# Stripe notifies us asynchronously about payment lifecycle events. The handler
+# below verifies the signature (when STRIPE_WEBHOOK_SECRET is set) and routes a
+# handful of events. handle_event() takes an already-parsed dict so it is fully
+# testable without the stripe package or a live signature.
+
+# Events we explicitly act on. Anything else is acknowledged but ignored.
+HANDLED_EVENTS = {
+    "checkout.session.completed",
+    "invoice.paid",
+    "invoice.payment_failed",
+    "customer.subscription.deleted",
+}
+
+
+def webhook_configured() -> bool:
+    """True only when a webhook signing secret is present in the environment."""
+    return bool(os.getenv("STRIPE_WEBHOOK_SECRET"))
+
+
+def verify_webhook(payload: bytes, sig_header: str) -> dict:
+    """Verify a raw Stripe webhook payload and return the parsed event dict.
+
+    Raises:
+        BillingNotConfigured: no signing secret or the stripe package missing.
+        WebhookError: signature/payload verification failed.
+    """
+    secret = os.getenv("STRIPE_WEBHOOK_SECRET")
+    if not secret:
+        raise BillingNotConfigured("Webhooks are not configured. Set STRIPE_WEBHOOK_SECRET to enable them.")
+
+    try:
+        import stripe  # imported lazily so the package is optional
+    except ImportError as exc:  # pragma: no cover - depends on optional dep
+        raise BillingNotConfigured("The 'stripe' package is not installed. Run: pip install stripe") from exc
+
+    try:
+        event = stripe.Webhook.construct_event(payload, sig_header, secret)
+    except Exception as exc:  # stripe raises SignatureVerificationError / ValueError
+        raise WebhookError(f"Webhook verification failed: {exc}") from exc
+
+    return dict(event)
+
+
+def handle_event(event: dict) -> dict:
+    """Route a parsed Stripe event. Returns a small ack dict.
+
+    This is deliberately side-effect-light: it logs and reports what it would
+    act on. Wire real entitlement/state changes into the branches below.
+    """
+    event_type = event.get("type", "")
+    data_object = (event.get("data") or {}).get("object") or {}
+
+    if event_type not in HANDLED_EVENTS:
+        logger.info("Ignoring unhandled Stripe event: %s", event_type)
+        return {"status": "ignored", "type": event_type}
+
+    if event_type == "checkout.session.completed":
+        # A customer finished checkout — grant access here.
+        logger.info("Checkout completed: customer=%s", data_object.get("customer"))
+    elif event_type == "invoice.paid":
+        logger.info("Invoice paid: %s", data_object.get("id"))
+    elif event_type == "invoice.payment_failed":
+        # Payment failed — flag the account / start dunning here.
+        logger.warning("Payment failed: customer=%s", data_object.get("customer"))
+    elif event_type == "customer.subscription.deleted":
+        # Subscription cancelled — revoke access here.
+        logger.info("Subscription cancelled: customer=%s", data_object.get("customer"))
+
+    return {"status": "handled", "type": event_type}

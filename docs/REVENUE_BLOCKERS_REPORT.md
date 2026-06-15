@@ -23,8 +23,10 @@ listed honestly below as owner actions, not as things the code now does.
 | 6 | API disconnected from the core engine | `app.py` now exposes `/api/status` backed by the revenue engine |
 | 7 | Flaky local lint (flake8 fell back to 79 chars) | Native `.flake8` config; 0 errors locally and in CI |
 | 8 | Unpinned deps + broken `asyncio` PyPI pin | `requirements.txt` pinned with upper bounds; bogus pin removed |
+| 9 | No customer-facing checkout UI | `GET /store` serves a self-contained pricing/checkout page (`static/index.html`) |
+| 10 | No way to react to payment events | `POST /api/webhooks/stripe` verifies signatures and routes events (`src/billing.py`) |
 
-Test suite: **64 passing** (was 48). CI quality gate (black/isort/flake8/bandit): clean.
+Test suite: **70 passing** (was 48). CI quality gate (black/isort/flake8/bandit): clean.
 
 ---
 
@@ -39,12 +41,12 @@ Priority order to first dollar:
    legal advice. Have counsel review before relying on it; register the entity
    that will hold the contract and receive funds.
 3. **Bank account + tax/EIN** so Stripe payouts have a destination.
-4. **A public website with the pricing page and a checkout button** wired to
-   `POST /api/checkout`. The API exists; the front-end does not.
-5. **A deployed, reachable API.** `vercel.json` + `Dockerfile` exist; an actual
-   production deployment with a domain and TLS is still required.
-6. **Webhook handling for Stripe events** (subscription created / payment
-   failed / cancelled) to keep entitlement state correct. Not yet implemented.
+4. **A deployed, reachable API + domain/TLS.** `vercel.json` + `Dockerfile`
+   exist and `GET /store` serves the checkout page; an actual production
+   deployment is still required to take real traffic.
+5. **Persist entitlement state from webhooks.** `POST /api/webhooks/stripe`
+   now verifies and routes events; the handler branches are stubbed with
+   `logger` calls — wire them to real grant/revoke logic + a datastore.
 
 ---
 

@@ -19,9 +19,11 @@ The **APEX Universal AI Operating System** provides a full autonomy stack for en
 | **Scale** | $10,000/mo | High-throughput autonomous workloads |
 | **Enterprise** | Custom | Self-hosted, commercial license, dedicated team |
 
-The live catalog is served from `GET /pricing`. Self-serve checkout runs through
-Stripe and is **disabled until configured** — set `STRIPE_SECRET_KEY` and the
-`STRIPE_PRICE_*` IDs (see `.env.example`) to turn it on. Enterprise is contact-sales.
+The live catalog is served from `GET /pricing`, and a ready-to-use checkout page
+is served at `GET /store`. Self-serve checkout runs through Stripe and is
+**disabled until configured** — set `STRIPE_SECRET_KEY`, the `STRIPE_PRICE_*` IDs,
+and `STRIPE_WEBHOOK_SECRET` (see `.env.example`) to turn it on. Enterprise is
+contact-sales.
 
 ---
 
