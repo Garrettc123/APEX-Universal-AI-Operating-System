@@ -173,6 +173,20 @@ class TestAPEXOrchestrator:
         assert isinstance(revenue, float)
         assert revenue >= 0.0
 
+    def test_has_breakthrough_engine(self):
+        orchestrator = APEXOrchestrator()
+        assert orchestrator.breakthrough_engine is not None
+        assert orchestrator.breakthrough_engine.breakthroughs == []
+
+    async def test_discover_breakthroughs(self):
+        orchestrator = APEXOrchestrator()
+        portfolio = await orchestrator.discover_breakthroughs(count=4)
+        assert len(portfolio) == 4
+        # Engine retains the generated candidates
+        assert len(orchestrator.breakthrough_engine.breakthroughs) == 4
+        scores = [b.score for b in portfolio]
+        assert scores == sorted(scores, reverse=True)
+
     async def test_monitor_health_all_healthy(self):
         orchestrator = APEXOrchestrator()
         orchestrator.initialize_repositories()

@@ -16,6 +16,8 @@ from typing import Dict, List, Optional
 import numpy as np
 import scipy.sparse as sp
 
+from .breakthrough_engine import BreakthroughEngine
+
 logger = logging.getLogger(__name__)
 
 
@@ -184,6 +186,7 @@ class APEXOrchestrator:
         self.repositories: Dict[str, Repository] = {}
         self.fusion_engine = NeuralFusionEngine()
         self.revenue_engine = AutonomousRevenueEngine()
+        self.breakthrough_engine = BreakthroughEngine()
         self.intelligence_level = 1.0
         self.evolution_cycles = 0
 
@@ -261,6 +264,13 @@ class APEXOrchestrator:
 
         return revenue
 
+    async def discover_breakthroughs(self, count: int = 3):
+        """Generate and log a batch of ranked breakthrough candidates."""
+        portfolio = await self.breakthrough_engine.generate_portfolio(count=count)
+        for bt in portfolio:
+            logger.info(f"Breakthrough candidate [{bt.score:.3f}]: {bt.title}")
+        return portfolio
+
     async def monitor_health(self):
         """Continuous health monitoring"""
         unhealthy = []
@@ -300,6 +310,10 @@ class APEXOrchestrator:
             if cycle % 10 == 0:  # Every 10 cycles
                 await self.generate_revenue_cycle()
 
+            # Breakthrough discovery
+            if cycle % 10 == 0:  # Every 10 cycles
+                await self.discover_breakthroughs()
+
             # Optimization
             if cycle % 5 == 0:  # Every 5 cycles
                 await self.optimize_systems()
@@ -322,6 +336,13 @@ class APEXOrchestrator:
         logger.info(f"Intelligence Level: {self.intelligence_level:.4f}")
         logger.info(f"Total Revenue: ${self.revenue_engine.total_revenue:,.2f}")
         logger.info(f"Annual Projection: ${self.revenue_engine.get_annual_projection():,.2f}")
+        logger.info(f"Breakthroughs Generated: {len(self.breakthrough_engine.breakthroughs)}")
+
+        top = self.breakthrough_engine.get_top(3)
+        if top:
+            logger.info("\nTop Breakthrough Candidates:")
+            for bt in top:
+                logger.info(f"  [{bt.score:.3f}] {bt.title}")
 
         logger.info("\nRepository Health:")
         for name, repo in sorted(self.repositories.items(), key=lambda x: x[1].health_score, reverse=True)[:10]:
