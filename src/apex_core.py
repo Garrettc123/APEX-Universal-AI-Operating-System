@@ -16,6 +16,7 @@ from typing import Dict, List, Optional
 import numpy as np
 import scipy.sparse as sp
 
+from . import db
 from .breakthrough_engine import BreakthroughEngine
 
 logger = logging.getLogger(__name__)
@@ -97,14 +98,24 @@ class AutonomousRevenueEngine:
         # FIX: Track monthly revenue in a rolling dict for accurate projections
         self._monthly_revenue: Dict[str, float] = {}
 
-        # Optional file-based persistence so revenue state survives restarts.
-        # Falls back to the APEX_STATE_FILE env var when not passed explicitly.
+        # Persistence: a database (when DATABASE_URL/SUPABASE_DB_URL is set) is
+        # preferred; otherwise an optional JSON file (APEX_STATE_FILE). Both are
+        # optional — with neither configured the engine is purely in-memory.
         self.state_file = state_file or os.getenv("APEX_STATE_FILE")
-        if self.state_file:
+        if self.state_file or db.is_configured():
             self.load()
 
     def load(self) -> bool:
-        """Load persisted revenue state from disk. Returns True if loaded."""
+        """Load persisted revenue state (DB first, then JSON file). True if loaded."""
+        # Prefer the database when configured.
+        if db.is_configured():
+            state = db.load_revenue_state()
+            if state is not None:
+                self.total_revenue = float(state["total_revenue"])
+                self._monthly_revenue = {str(k): float(v) for k, v in state["monthly_revenue"].items()}
+                logger.info(f"Loaded revenue state from DB: total=${self.total_revenue:,.2f}")
+                return True
+
         if not self.state_file or not os.path.exists(self.state_file):
             return False
         try:
@@ -124,7 +135,10 @@ class AutonomousRevenueEngine:
         return True
 
     def save(self) -> None:
-        """Persist revenue state to disk (atomic write). No-op if unconfigured."""
+        """Persist revenue state to the DB (if configured) and/or JSON file."""
+        if db.is_configured():
+            db.save_revenue_state(self.total_revenue, self._monthly_revenue)
+
         if not self.state_file:
             return
         data = {

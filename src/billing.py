@@ -20,6 +20,7 @@ import logging
 import os
 from typing import Optional
 
+from . import db
 from .pricing import Plan, get_plan
 
 logger = logging.getLogger(__name__)
@@ -149,16 +150,22 @@ def handle_event(event: dict) -> dict:
         logger.info("Ignoring unhandled Stripe event: %s", event_type)
         return {"status": "ignored", "type": event_type}
 
+    customer = data_object.get("customer")
+
     if event_type == "checkout.session.completed":
-        # A customer finished checkout — grant access here.
-        logger.info("Checkout completed: customer=%s", data_object.get("customer"))
+        # A customer finished checkout — grant access.
+        logger.info("Checkout completed: customer=%s", customer)
+        db.record_subscription(customer, status="active")
     elif event_type == "invoice.paid":
         logger.info("Invoice paid: %s", data_object.get("id"))
+        db.record_subscription(customer, status="active")
     elif event_type == "invoice.payment_failed":
-        # Payment failed — flag the account / start dunning here.
-        logger.warning("Payment failed: customer=%s", data_object.get("customer"))
+        # Payment failed — flag the account / start dunning.
+        logger.warning("Payment failed: customer=%s", customer)
+        db.record_subscription(customer, status="past_due")
     elif event_type == "customer.subscription.deleted":
-        # Subscription cancelled — revoke access here.
-        logger.info("Subscription cancelled: customer=%s", data_object.get("customer"))
+        # Subscription cancelled — revoke access.
+        logger.info("Subscription cancelled: customer=%s", customer)
+        db.revoke_subscription(customer)
 
     return {"status": "handled", "type": event_type}

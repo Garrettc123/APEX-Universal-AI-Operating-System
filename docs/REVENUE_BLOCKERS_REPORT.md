@@ -26,8 +26,9 @@ listed honestly below as owner actions, not as things the code now does.
 | 9 | No customer-facing checkout UI | `GET /store` serves a self-contained pricing/checkout page (`static/index.html`) |
 | 10 | No way to react to payment events | `POST /api/webhooks/stripe` verifies signatures and routes events (`src/billing.py`) |
 | 11 | No R&D prioritization tooling | `BreakthroughEngine` (`src/breakthrough_engine.py`) generates/scores/ranks ideas; served at `GET /api/breakthroughs` |
+| 12 | Entitlements/revenue only in a JSON file | Supabase/Postgres layer (`src/db.py` + `supabase/migrations/0001_init.sql`); webhooks grant/revoke, revenue persists to DB when `DATABASE_URL` is set |
 
-Test suite: **83 passing** (was 48). CI quality gate (black/isort/flake8/bandit): clean.
+Test suite: **92 passing** (was 48). CI quality gate (black/isort/flake8/bandit): clean.
 
 ---
 
@@ -45,9 +46,12 @@ Priority order to first dollar:
 4. **A deployed, reachable API + domain/TLS.** `vercel.json` + `Dockerfile`
    exist and `GET /store` serves the checkout page; an actual production
    deployment is still required to take real traffic.
-5. **Persist entitlement state from webhooks.** `POST /api/webhooks/stripe`
-   now verifies and routes events; the handler branches are stubbed with
-   `logger` calls — wire them to real grant/revoke logic + a datastore.
+5. **Stand up the database.** The code path is complete — `POST /api/webhooks/stripe`
+   grants/revokes entitlements and revenue persists via `src/db.py` whenever
+   `DATABASE_URL` is set. To activate: run `supabase start` (needs Docker),
+   apply `supabase/migrations/0001_init.sql`, `pip install "psycopg[binary]"`,
+   and export `DATABASE_URL`. (Could not be run in the build sandbox: no Docker
+   daemon / Supabase CLI / backup file present.)
 
 ---
 

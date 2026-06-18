@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
-from src import billing, pricing
+from src import billing, db, pricing
 from src.apex_core import AutonomousRevenueEngine
 from src.breakthrough_engine import DOMAINS as BREAKTHROUGH_DOMAINS
 from src.breakthrough_engine import BreakthroughEngine
@@ -109,9 +109,10 @@ async def status():
         "revenue": {
             "total_usd": revenue_engine.total_revenue,
             "annual_projection_usd": revenue_engine.get_annual_projection(),
-            "persistence_enabled": revenue_engine.state_file is not None,
+            "persistence_enabled": revenue_engine.state_file is not None or db.is_configured(),
         },
         "billing_enabled": billing.is_configured(),
+        "database_enabled": db.is_configured(),
     }
 
 
