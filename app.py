@@ -7,6 +7,8 @@ from pydantic import BaseModel
 
 from src import billing, pricing
 from src.apex_core import AutonomousRevenueEngine
+from src.breakthrough_engine import DOMAINS as BREAKTHROUGH_DOMAINS
+from src.breakthrough_engine import BreakthroughEngine
 
 STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
 
@@ -111,6 +113,31 @@ async def status():
         },
         "billing_enabled": billing.is_configured(),
     }
+
+
+@app.get("/api/breakthroughs")
+async def breakthroughs(count: int = 5, domain: str | None = None, seed: int | None = None):
+    """Generate and rank candidate breakthrough ideas.
+
+    Query params:
+        count: how many candidates to generate (1-50).
+        domain: optional domain filter (see /api/breakthroughs/domains).
+        seed: optional RNG seed for reproducible output.
+    """
+    if not 1 <= count <= 50:
+        raise HTTPException(status_code=422, detail="count must be between 1 and 50")
+    engine = BreakthroughEngine(seed=seed)
+    try:
+        portfolio = await engine.generate_portfolio(count=count, domain=domain)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"count": len(portfolio), "breakthroughs": [b.to_dict() for b in portfolio]}
+
+
+@app.get("/api/breakthroughs/domains")
+async def breakthrough_domains():
+    """List the domains the breakthrough engine can generate ideas for."""
+    return {"domains": sorted(BREAKTHROUGH_DOMAINS)}
 
 
 # NOTE: Entrypoint is in main.py - no duplicate uvicorn block here

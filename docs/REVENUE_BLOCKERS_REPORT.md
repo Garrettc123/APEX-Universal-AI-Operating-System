@@ -25,8 +25,9 @@ listed honestly below as owner actions, not as things the code now does.
 | 8 | Unpinned deps + broken `asyncio` PyPI pin | `requirements.txt` pinned with upper bounds; bogus pin removed |
 | 9 | No customer-facing checkout UI | `GET /store` serves a self-contained pricing/checkout page (`static/index.html`) |
 | 10 | No way to react to payment events | `POST /api/webhooks/stripe` verifies signatures and routes events (`src/billing.py`) |
+| 11 | No R&D prioritization tooling | `BreakthroughEngine` (`src/breakthrough_engine.py`) generates/scores/ranks ideas; served at `GET /api/breakthroughs` |
 
-Test suite: **70 passing** (was 48). CI quality gate (black/isort/flake8/bandit): clean.
+Test suite: **83 passing** (was 48). CI quality gate (black/isort/flake8/bandit): clean.
 
 ---
 
