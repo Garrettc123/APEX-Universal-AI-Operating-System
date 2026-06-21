@@ -98,3 +98,38 @@ def test_entitlement_loop_grant_then_read(monkeypatch):
     assert body["status"] == "active"
     assert body["plan_id"] == "pro"
     entitlements._reset_memory()
+
+
+def test_breakthroughs_open_when_enforcement_off(monkeypatch):
+    monkeypatch.delenv("ENFORCE_ENTITLEMENTS", raising=False)
+    # No customer header needed when enforcement is disabled (default).
+    assert client.get("/api/breakthroughs?count=2").status_code == 200
+
+
+def test_breakthroughs_requires_header_when_enforced(monkeypatch):
+    monkeypatch.setenv("ENFORCE_ENTITLEMENTS", "true")
+    resp = client.get("/api/breakthroughs?count=2")
+    assert resp.status_code == 401
+
+
+def test_breakthroughs_payment_required_without_access(monkeypatch):
+    from src import entitlements
+
+    monkeypatch.setenv("ENFORCE_ENTITLEMENTS", "true")
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    entitlements._reset_memory()
+    resp = client.get("/api/breakthroughs?count=2", headers={"X-Customer-Id": "cus_none"})
+    assert resp.status_code == 402
+
+
+def test_breakthroughs_allowed_with_active_entitlement(monkeypatch):
+    from src import entitlements
+
+    monkeypatch.setenv("ENFORCE_ENTITLEMENTS", "true")
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    entitlements._reset_memory()
+    entitlements.grant("cus_paid", plan_id="pro", status="active")
+    resp = client.get("/api/breakthroughs?count=2", headers={"X-Customer-Id": "cus_paid"})
+    assert resp.status_code == 200
+    assert resp.json()["count"] == 2
+    entitlements._reset_memory()

@@ -1,6 +1,6 @@
 import os
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
@@ -37,6 +37,32 @@ CONTACT_SALES = os.getenv("CONTACT_SALES_EMAIL", "gwc2780@gmail.com")
 
 class CheckoutRequest(BaseModel):
     plan_id: str
+
+
+def _enforce_entitlements() -> bool:
+    """Whether premium endpoints require an active subscription.
+
+    Read live (not cached at import) so deployments — and tests — can toggle it
+    via the ENFORCE_ENTITLEMENTS env var. Off by default so the open demo and
+    self-hosted use keep working without a billing setup.
+    """
+    return os.getenv("ENFORCE_ENTITLEMENTS", "").lower() in {"1", "true", "yes", "on"}
+
+
+async def require_active_entitlement(x_customer_id: str | None = Header(default=None)):
+    """FastAPI dependency gating premium endpoints behind a paid entitlement.
+
+    No-op unless ENFORCE_ENTITLEMENTS is enabled. When enabled, the caller must
+    send an ``X-Customer-Id`` header for a customer with active access, or the
+    request is rejected with 401 (missing) / 402 (no active subscription).
+    """
+    if not _enforce_entitlements():
+        return None
+    if not x_customer_id:
+        raise HTTPException(status_code=401, detail="Missing X-Customer-Id header")
+    if not entitlements.has_active_access(x_customer_id):
+        raise HTTPException(status_code=402, detail="Active subscription required. See /pricing")
+    return x_customer_id
 
 
 @app.get("/")
@@ -132,9 +158,11 @@ async def status():
     }
 
 
-@app.get("/api/breakthroughs")
+@app.get("/api/breakthroughs", dependencies=[Depends(require_active_entitlement)])
 async def breakthroughs(count: int = 5, domain: str | None = None, seed: int | None = None):
-    """Generate and rank candidate breakthrough ideas.
+    """Generate and rank candidate breakthrough ideas. (Premium endpoint.)
+
+    Gated by ``require_active_entitlement`` when ENFORCE_ENTITLEMENTS is set.
 
     Query params:
         count: how many candidates to generate (1-50).
