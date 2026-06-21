@@ -121,6 +121,24 @@ Entitlements are granted/revoked automatically by Stripe webhooks and can be
 inspected via `GET /api/entitlements/{customer_id}`. The applied DB schema lives
 in `supabase/migrations/0001_init.sql`.
 
+### Vercel Connect (third-party tokens)
+
+`src/vercel_connect.py` consumes [Vercel Connect](https://vercel.com/docs/connect)
+connectors (e.g. a `github/acme-github` GitHub connector) to obtain scoped
+third-party tokens without storing long-lived secrets. It exchanges the
+project's `VERCEL_OIDC_TOKEN` over the HTTP API (the Python equivalent of the
+`@vercel/connect` SDK, since this is a Python app).
+
+Setup (run from a directory with `vercel.json`, authenticated Vercel CLI):
+
+```bash
+vercel connect create github --name acme-github   # opens a browser to authorize
+vercel env pull                                    # pulls VERCEL_OIDC_TOKEN locally
+```
+
+Then in code: `vercel_connect.get_token("github/acme-github")` returns a scoped
+token (or `None` when `VERCEL_OIDC_TOKEN` is unset — safe by default).
+
 ### Infrastructure variables
 
 - `DATABASE_URL` - PostgreSQL connection string
