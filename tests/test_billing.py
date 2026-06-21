@@ -54,9 +54,9 @@ def test_handle_event_ignored():
     assert result == {"status": "ignored", "type": "some.other.event"}
 
 
-def test_checkout_completed_records_subscription(monkeypatch):
+def test_checkout_completed_grants_entitlement(monkeypatch):
     calls = {}
-    monkeypatch.setattr(billing.db, "record_subscription", lambda cid, **kw: calls.update(cid=cid, kw=kw) or True)
+    monkeypatch.setattr(billing.entitlements, "grant", lambda cid, **kw: calls.update(cid=cid, kw=kw) or True)
     billing.handle_event({"type": "checkout.session.completed", "data": {"object": {"customer": "cus_42"}}})
     assert calls["cid"] == "cus_42"
     assert calls["kw"]["status"] == "active"
@@ -64,6 +64,6 @@ def test_checkout_completed_records_subscription(monkeypatch):
 
 def test_subscription_deleted_revokes(monkeypatch):
     revoked = {}
-    monkeypatch.setattr(billing.db, "revoke_subscription", lambda cid: revoked.update(cid=cid) or True)
+    monkeypatch.setattr(billing.entitlements, "revoke", lambda cid: revoked.update(cid=cid) or True)
     billing.handle_event({"type": "customer.subscription.deleted", "data": {"object": {"customer": "cus_9"}}})
     assert revoked["cid"] == "cus_9"

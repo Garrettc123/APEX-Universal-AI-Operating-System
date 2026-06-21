@@ -131,3 +131,27 @@ def record_subscription(customer_id: str, plan_id: Optional[str] = None, status:
 def revoke_subscription(customer_id: str) -> bool:
     """Mark a customer's entitlement as cancelled. Returns True on success."""
     return record_subscription(customer_id, status="cancelled")
+
+
+def get_subscription(customer_id: str) -> Optional[dict]:
+    """Return {'customer_id','plan_id','status'} for a customer, or None."""
+    if not customer_id:
+        return None
+    conn = _connect()
+    if conn is None:
+        return None
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "select customer_id, plan_id, status from subscriptions where customer_id = %s",
+                (customer_id,),
+            )
+            row = cur.fetchone()
+        if not row:
+            return None
+        return {"customer_id": row[0], "plan_id": row[1], "status": row[2]}
+    except Exception as exc:  # pragma: no cover - depends on a live DB
+        logger.warning("get_subscription failed: %s", exc)
+        return None
+    finally:
+        conn.close()

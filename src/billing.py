@@ -20,7 +20,7 @@ import logging
 import os
 from typing import Optional
 
-from . import db
+from . import entitlements
 from .pricing import Plan, get_plan
 
 logger = logging.getLogger(__name__)
@@ -155,17 +155,17 @@ def handle_event(event: dict) -> dict:
     if event_type == "checkout.session.completed":
         # A customer finished checkout — grant access.
         logger.info("Checkout completed: customer=%s", customer)
-        db.record_subscription(customer, status="active")
+        entitlements.grant(customer, status="active")
     elif event_type == "invoice.paid":
         logger.info("Invoice paid: %s", data_object.get("id"))
-        db.record_subscription(customer, status="active")
+        entitlements.grant(customer, status="active")
     elif event_type == "invoice.payment_failed":
         # Payment failed — flag the account / start dunning.
         logger.warning("Payment failed: customer=%s", customer)
-        db.record_subscription(customer, status="past_due")
+        entitlements.grant(customer, status="past_due")
     elif event_type == "customer.subscription.deleted":
         # Subscription cancelled — revoke access.
         logger.info("Subscription cancelled: customer=%s", customer)
-        db.revoke_subscription(customer)
+        entitlements.revoke(customer)
 
     return {"status": "handled", "type": event_type}

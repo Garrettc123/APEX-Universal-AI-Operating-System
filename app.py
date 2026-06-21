@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
-from src import billing, db, pricing
+from src import billing, db, entitlements, pricing
 from src.apex_core import AutonomousRevenueEngine
 from src.breakthrough_engine import DOMAINS as BREAKTHROUGH_DOMAINS
 from src.breakthrough_engine import BreakthroughEngine
@@ -97,6 +97,22 @@ async def stripe_webhook(request: Request):
     except billing.WebhookError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return billing.handle_event(event)
+
+
+@app.get("/api/entitlements/{customer_id}")
+async def get_entitlement(customer_id: str):
+    """Report whether a customer currently has paid access.
+
+    This is the read side of the payment loop: Stripe webhooks grant/revoke
+    entitlements, and feature gates query this to authorize access.
+    """
+    record = entitlements.get(customer_id)
+    return {
+        "customer_id": customer_id,
+        "active": entitlements.has_active_access(customer_id),
+        "status": record["status"] if record else None,
+        "plan_id": record.get("plan_id") if record else None,
+    }
 
 
 @app.get("/api/status")

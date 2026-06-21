@@ -77,3 +77,24 @@ def test_breakthrough_domains_endpoint():
     resp = client.get("/api/breakthroughs/domains")
     assert resp.status_code == 200
     assert "fintech" in resp.json()["domains"]
+
+
+def test_entitlement_unknown_customer():
+    resp = client.get("/api/entitlements/never_seen")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body == {"customer_id": "never_seen", "active": False, "status": None, "plan_id": None}
+
+
+def test_entitlement_loop_grant_then_read(monkeypatch):
+    from src import entitlements
+
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    entitlements._reset_memory()
+    # Simulate a Stripe webhook granting access, then read it back via the API.
+    entitlements.grant("cus_api", plan_id="pro", status="active")
+    body = client.get("/api/entitlements/cus_api").json()
+    assert body["active"] is True
+    assert body["status"] == "active"
+    assert body["plan_id"] == "pro"
+    entitlements._reset_memory()

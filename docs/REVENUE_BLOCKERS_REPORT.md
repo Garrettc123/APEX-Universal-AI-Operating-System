@@ -27,8 +27,9 @@ listed honestly below as owner actions, not as things the code now does.
 | 10 | No way to react to payment events | `POST /api/webhooks/stripe` verifies signatures and routes events (`src/billing.py`) |
 | 11 | No R&D prioritization tooling | `BreakthroughEngine` (`src/breakthrough_engine.py`) generates/scores/ranks ideas; served at `GET /api/breakthroughs` |
 | 12 | Entitlements/revenue only in a JSON file | Supabase/Postgres layer (`src/db.py` + `supabase/migrations/0001_init.sql`); webhooks grant/revoke, revenue persists to DB when `DATABASE_URL` is set |
+| 13 | Payments written but never enforced | Entitlement service (`src/entitlements.py`) closes the loop: webhooks grant/revoke, `GET /api/entitlements/{id}` + `has_active_access()` authorize paid access. DB-backed when configured, in-memory otherwise |
 
-Test suite: **92 passing** (was 48). CI quality gate (black/isort/flake8/bandit): clean.
+Test suite: **100 passing** (was 48). CI quality gate (black/isort/flake8/bandit): clean.
 
 ---
 
