@@ -1,19 +1,23 @@
 name: Branch Janitor
 
-# Deletes remote branches that are already fully merged into the default branch.
-# Safe by construction: only branches whose tip is an ancestor of main are
-# removed, so nothing unmerged is ever lost. Open-PR head branches and the
-# default branch are always skipped.
+# Auto-removes junk branches so they never pile up again. Three safe categories:
+#   1. Fully integrated  — every commit is already in the default branch
+#      (merged OR patch-equivalent / cherry-picked). Detected via `git cherry`,
+#      so nothing unique is ever lost.
+#   2. Disposable bot branches — matching BOT_PREFIXES (copilot/*, vercel/*),
+#      which are throwaway automation artifacts.
+# Open-PR head branches, the default branch, and anything under keep prefixes
+# (claude/*) are NEVER deleted unless they are fully integrated.
 
 on:
   schedule:
-    - cron: '0 6 * * 1' # Mondays 06:00 UTC
+    - cron: '0 7 * * 1' # Mondays 07:00 UTC
   workflow_dispatch:
     inputs:
       dry_run:
         description: 'List what would be deleted without deleting'
         type: boolean
-        default: true
+        default: false
 
 permissions:
   contents: write
@@ -22,6 +26,10 @@ permissions:
 concurrency:
   group: branch-janitor
   cancel-in-progress: false
+
+env:
+  BOT_PREFIXES: 'copilot/ vercel/'
+  KEEP_PREFIXES: 'claude/'
 
 jobs:
   cleanup:
@@ -32,7 +40,7 @@ jobs:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Delete merged branches
+      - name: Prune junk branches
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run || 'false' }}
@@ -41,26 +49,44 @@ jobs:
           DEFAULT="${{ github.event.repository.default_branch }}"
           git fetch origin --prune
 
-          # Head refs of open PRs must never be deleted.
           OPEN_HEADS="$(gh pr list --repo "${{ github.repository }}" --state open \
             --json headRefName --jq '.[].headRefName' 2>/dev/null || true)"
 
           deleted=0
           for ref in $(git for-each-ref --format='%(refname:short)' refs/remotes/origin); do
             b="${ref#origin/}"
-            case "$b" in
-              "$DEFAULT"|HEAD) continue ;;
-            esac
+            case "$b" in "$DEFAULT"|HEAD) continue ;; esac
+
             if grep -qxF "$b" <<<"$OPEN_HEADS"; then
               echo "skip (open PR head): $b"; continue
             fi
-            if git merge-base --is-ancestor "origin/$b" "origin/$DEFAULT"; then
-              if [ "$DRY_RUN" = "true" ]; then
-                echo "would delete (merged): $b"
-              else
-                echo "deleting (merged): $b"
-                git push origin --delete "$b" && deleted=$((deleted+1)) || true
-              fi
+
+            # Fully integrated? No commit on the branch is missing from default
+            # (covers both merged and patch-equivalent/cherry-picked branches).
+            plus="$(git cherry "origin/$DEFAULT" "origin/$b" 2>/dev/null | grep -c '^+' || true)"
+            reason=""
+            if [ "$plus" -eq 0 ]; then
+              reason="integrated"
+            else
+              for p in $BOT_PREFIXES; do
+                case "$b" in "$p"*) reason="stale-bot" ;; esac
+              done
+            fi
+
+            # Never auto-delete keep-prefixed branches that still have unique work.
+            if [ "$reason" = "stale-bot" ]; then
+              for k in $KEEP_PREFIXES; do
+                case "$b" in "$k"*) reason="" ;; esac
+              done
+            fi
+
+            [ -z "$reason" ] && { echo "keep ($plus unique): $b"; continue; }
+
+            if [ "$DRY_RUN" = "true" ]; then
+              echo "would delete ($reason): $b"
+            else
+              echo "deleting ($reason): $b"
+              git push origin --delete "$b" && deleted=$((deleted+1)) || true
             fi
           done
           echo "Done. Deleted: $deleted (dry_run=$DRY_RUN)"
