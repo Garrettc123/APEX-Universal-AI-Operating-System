@@ -1,0 +1,11 @@
+# Native flake8 config — always read, no plugin required.
+#
+# NOTE: pyproject.toml also has a [tool.flake8] section, but flake8 only reads
+# it when the Flake8-pyproject plugin is installed AND compatible. That plugin
+# silently fails on some flake8 versions, causing flake8 to fall back to the
+# 79-char default and report dozens of false E501 errors locally. This file is
+# read natively by every flake8 version, so the 127-char limit always applies.
+[flake8]
+max-line-length = 127
+extend-ignore = E203, W503
+exclude = .git, __pycache__, .venv, build, dist

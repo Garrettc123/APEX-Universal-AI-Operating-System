@@ -5,14 +5,19 @@ Autonomous revenue generation, zero-human oversight.
 """
 
 import asyncio
+import json
 import logging
+import os
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 import numpy as np
 import scipy.sparse as sp
+
+from . import db
+from .breakthrough_engine import BreakthroughEngine
 
 logger = logging.getLogger(__name__)
 
@@ -81,7 +86,7 @@ class NeuralFusionEngine:
 class AutonomousRevenueEngine:
     """Generates revenue autonomously through multiple strategies"""
 
-    def __init__(self):
+    def __init__(self, state_file: Optional[str] = None):
         self.total_revenue = 0.0
         self.strategies = {
             "ai_services": {"rate": 1000, "clients": 0},
@@ -92,6 +97,59 @@ class AutonomousRevenueEngine:
         }
         # FIX: Track monthly revenue in a rolling dict for accurate projections
         self._monthly_revenue: Dict[str, float] = {}
+
+        # Persistence: a database (when DATABASE_URL/SUPABASE_DB_URL is set) is
+        # preferred; otherwise an optional JSON file (APEX_STATE_FILE). Both are
+        # optional — with neither configured the engine is purely in-memory.
+        self.state_file = state_file or os.getenv("APEX_STATE_FILE")
+        if self.state_file or db.is_configured():
+            self.load()
+
+    def load(self) -> bool:
+        """Load persisted revenue state (DB first, then JSON file). True if loaded."""
+        # Prefer the database when configured.
+        if db.is_configured():
+            state = db.load_revenue_state()
+            if state is not None:
+                self.total_revenue = float(state["total_revenue"])
+                self._monthly_revenue = {str(k): float(v) for k, v in state["monthly_revenue"].items()}
+                logger.info(f"Loaded revenue state from DB: total=${self.total_revenue:,.2f}")
+                return True
+
+        if not self.state_file or not os.path.exists(self.state_file):
+            return False
+        try:
+            with open(self.state_file, "r", encoding="utf-8") as fh:
+                data = json.load(fh)
+        except (OSError, ValueError) as exc:
+            logger.warning(f"Could not load revenue state from {self.state_file}: {exc}")
+            return False
+
+        self.total_revenue = float(data.get("total_revenue", 0.0))
+        self._monthly_revenue = {str(k): float(v) for k, v in data.get("monthly_revenue", {}).items()}
+        saved_strategies = data.get("strategies", {})
+        for name, cfg in saved_strategies.items():
+            if name in self.strategies:
+                self.strategies[name]["clients"] = int(cfg.get("clients", 0))
+        logger.info(f"Loaded revenue state: total=${self.total_revenue:,.2f}")
+        return True
+
+    def save(self) -> None:
+        """Persist revenue state to the DB (if configured) and/or JSON file."""
+        if db.is_configured():
+            db.save_revenue_state(self.total_revenue, self._monthly_revenue)
+
+        if not self.state_file:
+            return
+        data = {
+            "total_revenue": self.total_revenue,
+            "monthly_revenue": self._monthly_revenue,
+            "strategies": {name: {"clients": cfg["clients"]} for name, cfg in self.strategies.items()},
+        }
+        tmp = f"{self.state_file}.tmp"
+        with open(tmp, "w", encoding="utf-8") as fh:
+            json.dump(data, fh, indent=2)
+        os.replace(tmp, self.state_file)
 
     def _month_key(self) -> str:
         now = datetime.now()
@@ -118,6 +176,9 @@ class AutonomousRevenueEngine:
         key = self._month_key()
         self._monthly_revenue[key] = self._monthly_revenue.get(key, 0.0) + cycle_revenue
 
+        # Persist state (no-op unless a state file is configured)
+        self.save()
+
         return cycle_revenue
 
     def get_annual_projection(self) -> float:
@@ -139,6 +200,7 @@ class APEXOrchestrator:
         self.repositories: Dict[str, Repository] = {}
         self.fusion_engine = NeuralFusionEngine()
         self.revenue_engine = AutonomousRevenueEngine()
+        self.breakthrough_engine = BreakthroughEngine()
         self.intelligence_level = 1.0
         self.evolution_cycles = 0
 
@@ -216,6 +278,13 @@ class APEXOrchestrator:
 
         return revenue
 
+    async def discover_breakthroughs(self, count: int = 3):
+        """Generate and log a batch of ranked breakthrough candidates."""
+        portfolio = await self.breakthrough_engine.generate_portfolio(count=count)
+        for bt in portfolio:
+            logger.info(f"Breakthrough candidate [{bt.score:.3f}]: {bt.title}")
+        return portfolio
+
     async def monitor_health(self):
         """Continuous health monitoring"""
         unhealthy = []
@@ -255,6 +324,10 @@ class APEXOrchestrator:
             if cycle % 10 == 0:  # Every 10 cycles
                 await self.generate_revenue_cycle()
 
+            # Breakthrough discovery
+            if cycle % 10 == 0:  # Every 10 cycles
+                await self.discover_breakthroughs()
+
             # Optimization
             if cycle % 5 == 0:  # Every 5 cycles
                 await self.optimize_systems()
@@ -277,6 +350,13 @@ class APEXOrchestrator:
         logger.info(f"Intelligence Level: {self.intelligence_level:.4f}")
         logger.info(f"Total Revenue: ${self.revenue_engine.total_revenue:,.2f}")
         logger.info(f"Annual Projection: ${self.revenue_engine.get_annual_projection():,.2f}")
+        logger.info(f"Breakthroughs Generated: {len(self.breakthrough_engine.breakthroughs)}")
+
+        top = self.breakthrough_engine.get_top(3)
+        if top:
+            logger.info("\nTop Breakthrough Candidates:")
+            for bt in top:
+                logger.info(f"  [{bt.score:.3f}] {bt.title}")
 
         logger.info("\nRepository Health:")
         for name, repo in sorted(self.repositories.items(), key=lambda x: x[1].health_score, reverse=True)[:10]:

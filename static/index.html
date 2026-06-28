@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>APEX Universal AI OS — Pricing</title>
+  <style>
+    :root { color-scheme: dark; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: #0b0d12; color: #e6e8ee; line-height: 1.5;
+    }
+    header { text-align: center; padding: 56px 20px 24px; }
+    header h1 { margin: 0 0 8px; font-size: 2rem; }
+    header p { margin: 0; color: #9aa3b2; }
+    main {
+      display: grid; gap: 20px; max-width: 1080px; margin: 0 auto; padding: 24px 20px 64px;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    }
+    .card {
+      background: #141823; border: 1px solid #232838; border-radius: 14px; padding: 24px;
+      display: flex; flex-direction: column;
+    }
+    .card h2 { margin: 0 0 4px; font-size: 1.25rem; }
+    .price { font-size: 1.9rem; font-weight: 700; margin: 8px 0 2px; }
+    .price small { font-size: .85rem; color: #9aa3b2; font-weight: 400; }
+    .desc { color: #9aa3b2; min-height: 42px; }
+    ul { padding-left: 18px; margin: 14px 0; color: #c4cad6; flex: 1; }
+    li { margin: 4px 0; }
+    button {
+      width: 100%; padding: 12px; border: 0; border-radius: 10px; cursor: pointer;
+      font-size: 1rem; font-weight: 600; background: #4f7cff; color: #fff; transition: opacity .15s;
+    }
+    button:hover { opacity: .9; }
+    button.secondary { background: #232838; color: #e6e8ee; }
+    button:disabled { opacity: .5; cursor: not-allowed; }
+    #msg { text-align: center; min-height: 24px; padding: 0 20px 24px; color: #ffb454; }
+    footer { text-align: center; color: #6b7280; padding: 24px; font-size: .85rem; }
+    a { color: #4f7cff; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>🧠 APEX Universal AI OS</h1>
+    <p>Choose a plan to get started. Enterprise is custom — let's talk.</p>
+  </header>
+  <main id="plans">Loading plans…</main>
+  <div id="msg"></div>
+  <footer>
+    Questions? <a id="contact" href="#">Contact sales</a>
+  </footer>
+
+  <script>
+    const fmt = (n) => "$" + n.toLocaleString("en-US");
+    const msg = document.getElementById("msg");
+
+    async function checkout(planId, btn) {
+      msg.textContent = "";
+      btn.disabled = true;
+      btn.textContent = "Redirecting…";
+      try {
+        const res = await fetch("/api/checkout", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ plan_id: planId }),
+        });
+        const data = await res.json();
+        if (res.ok && data.url) {
+          window.location.href = data.url;
+          return;
+        }
+        msg.textContent = data.detail || "Checkout is not available right now.";
+      } catch (e) {
+        msg.textContent = "Network error — please try again.";
+      }
+      btn.disabled = false;
+      btn.textContent = "Subscribe";
+    }
+
+    async function load() {
+      const res = await fetch("/pricing");
+      const data = await res.json();
+      const contact = document.getElementById("contact");
+      if (data.contact_sales) contact.href = "mailto:" + data.contact_sales;
+
+      const root = document.getElementById("plans");
+      root.innerHTML = "";
+      for (const plan of data.plans) {
+        const card = document.createElement("div");
+        card.className = "card";
+        const price = plan.monthly_usd == null
+          ? '<div class="price">Custom</div>'
+          : '<div class="price">' + fmt(plan.monthly_usd) + ' <small>/mo</small></div>';
+        const features = (plan.features || []).map((f) => "<li>" + f + "</li>").join("");
+        card.innerHTML =
+          "<h2>" + plan.name + "</h2>" + price +
+          '<div class="desc">' + plan.description + "</div>" +
+          "<ul>" + features + "</ul>";
+
+        const btn = document.createElement("button");
+        if (plan.contact_sales) {
+          btn.className = "secondary";
+          btn.textContent = "Contact sales";
+          btn.onclick = () => { window.location.href = contact.href; };
+        } else {
+          btn.textContent = "Subscribe";
+          btn.onclick = () => checkout(plan.id, btn);
+          if (!plan.purchasable) {
+            // Priced plan but Stripe not configured yet — still let them click
+            // to see the clear "not available" message from the API.
+          }
+        }
+        card.appendChild(btn);
+        root.appendChild(card);
+      }
+      if (!data.billing_enabled) {
+        msg.textContent = "Note: self-serve checkout is not enabled yet — use Contact sales.";
+      }
+    }
+
+    load().catch(() => { document.getElementById("plans").textContent = "Failed to load plans."; });
+  </script>
+</body>
+</html>

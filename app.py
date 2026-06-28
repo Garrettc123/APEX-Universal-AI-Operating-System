@@ -1,7 +1,16 @@
 import os
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from pydantic import BaseModel
+
+from src import billing, db, entitlements, pricing
+from src.apex_core import AutonomousRevenueEngine
+from src.breakthrough_engine import DOMAINS as BREAKTHROUGH_DOMAINS
+from src.breakthrough_engine import BreakthroughEngine
+
+STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
 
 from src.dashboard_api import router as dashboard_router
 from src.integrations_api import router as integrations_router
@@ -21,6 +30,43 @@ app.add_middleware(
     allow_headers=["Authorization", "Content-Type", "X-Request-ID"],
 )
 
+# Single revenue engine instance for status reporting. Persists to disk when
+# APEX_STATE_FILE is set in the environment.
+revenue_engine = AutonomousRevenueEngine()
+
+# Where contact-sales / enterprise inquiries should go.
+CONTACT_SALES = os.getenv("CONTACT_SALES_EMAIL", "gwc2780@gmail.com")
+
+
+class CheckoutRequest(BaseModel):
+    plan_id: str
+
+
+def _enforce_entitlements() -> bool:
+    """Whether premium endpoints require an active subscription.
+
+    Read live (not cached at import) so deployments — and tests — can toggle it
+    via the ENFORCE_ENTITLEMENTS env var. Off by default so the open demo and
+    self-hosted use keep working without a billing setup.
+    """
+    return os.getenv("ENFORCE_ENTITLEMENTS", "").lower() in {"1", "true", "yes", "on"}
+
+
+async def require_active_entitlement(x_customer_id: str | None = Header(default=None)):
+    """FastAPI dependency gating premium endpoints behind a paid entitlement.
+
+    No-op unless ENFORCE_ENTITLEMENTS is enabled. When enabled, the caller must
+    send an ``X-Customer-Id`` header for a customer with active access, or the
+    request is rejected with 401 (missing) / 402 (no active subscription).
+    """
+    if not _enforce_entitlements():
+        return None
+    if not x_customer_id:
+        raise HTTPException(status_code=401, detail="Missing X-Customer-Id header")
+    if not entitlements.has_active_access(x_customer_id):
+        raise HTTPException(status_code=402, detail="Active subscription required. See /pricing")
+    return x_customer_id
+
 
 # Mobile command dashboard + integrations hub APIs (consumed by the native
 # Android app in android/)
@@ -36,6 +82,116 @@ async def root():
 @app.get("/health")
 async def health():
     return {"status": "healthy"}
+
+
+@app.get("/pricing")
+async def get_pricing():
+    """Public commercial pricing catalog."""
+    return {
+        "currency": "USD",
+        "billing_enabled": billing.is_configured(),
+        "contact_sales": CONTACT_SALES,
+        "plans": pricing.list_plans(),
+    }
+
+
+@app.get("/store", include_in_schema=False)
+async def store():
+    """Serve the minimal checkout front-end."""
+    return FileResponse(os.path.join(STATIC_DIR, "index.html"))
+
+
+@app.post("/api/checkout")
+async def create_checkout(req: CheckoutRequest):
+    """Create a Stripe Checkout Session for a purchasable plan.
+
+    Returns 404 for unknown plans and 503 when billing is not configured or
+    the plan is contact-sales only.
+    """
+    try:
+        return billing.create_checkout_session(req.plan_id)
+    except billing.UnknownPlan as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except billing.BillingNotConfigured as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+@app.post("/api/webhooks/stripe")
+async def stripe_webhook(request: Request):
+    """Receive and process Stripe webhook events.
+
+    Returns 503 when webhooks are not configured and 400 when signature
+    verification fails.
+    """
+    payload = await request.body()
+    sig_header = request.headers.get("stripe-signature", "")
+    try:
+        event = billing.verify_webhook(payload, sig_header)
+    except billing.BillingNotConfigured as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except billing.WebhookError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return billing.handle_event(event)
+
+
+@app.get("/api/entitlements/{customer_id}")
+async def get_entitlement(customer_id: str):
+    """Report whether a customer currently has paid access.
+
+    This is the read side of the payment loop: Stripe webhooks grant/revoke
+    entitlements, and feature gates query this to authorize access.
+    """
+    record = entitlements.get(customer_id)
+    return {
+        "customer_id": customer_id,
+        "active": entitlements.has_active_access(customer_id),
+        "status": record["status"] if record else None,
+        "plan_id": record.get("plan_id") if record else None,
+    }
+
+
+@app.get("/api/status")
+async def status():
+    """Operational + revenue snapshot of the running system."""
+    return {
+        "status": "healthy",
+        "service": "APEX AI Operating System",
+        "version": app.version,
+        "revenue": {
+            "total_usd": revenue_engine.total_revenue,
+            "annual_projection_usd": revenue_engine.get_annual_projection(),
+            "persistence_enabled": revenue_engine.state_file is not None or db.is_configured(),
+        },
+        "billing_enabled": billing.is_configured(),
+        "database_enabled": db.is_configured(),
+    }
+
+
+@app.get("/api/breakthroughs", dependencies=[Depends(require_active_entitlement)])
+async def breakthroughs(count: int = 5, domain: str | None = None, seed: int | None = None):
+    """Generate and rank candidate breakthrough ideas. (Premium endpoint.)
+
+    Gated by ``require_active_entitlement`` when ENFORCE_ENTITLEMENTS is set.
+
+    Query params:
+        count: how many candidates to generate (1-50).
+        domain: optional domain filter (see /api/breakthroughs/domains).
+        seed: optional RNG seed for reproducible output.
+    """
+    if not 1 <= count <= 50:
+        raise HTTPException(status_code=422, detail="count must be between 1 and 50")
+    engine = BreakthroughEngine(seed=seed)
+    try:
+        portfolio = await engine.generate_portfolio(count=count, domain=domain)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"count": len(portfolio), "breakthroughs": [b.to_dict() for b in portfolio]}
+
+
+@app.get("/api/breakthroughs/domains")
+async def breakthrough_domains():
+    """List the domains the breakthrough engine can generate ideas for."""
+    return {"domains": sorted(BREAKTHROUGH_DOMAINS)}
 
 
 # NOTE: Entrypoint is in main.py - no duplicate uvicorn block here

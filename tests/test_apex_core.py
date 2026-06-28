@@ -105,6 +105,34 @@ class TestAutonomousRevenueEngine:
         expected = (2_000.0 + 3_000.0 + 4_000.0) / 3 * 12
         assert projection == pytest.approx(expected)
 
+    def test_save_and_load_roundtrip(self, tmp_path):
+        """State persisted by one engine is restored by another."""
+        state_file = str(tmp_path / "state.json")
+        engine = AutonomousRevenueEngine(state_file=state_file)
+        engine.total_revenue = 42_000.0
+        engine._monthly_revenue["2026-01"] = 42_000.0
+        engine.strategies["ai_services"]["clients"] = 7
+        engine.save()
+
+        restored = AutonomousRevenueEngine(state_file=state_file)
+        assert restored.total_revenue == pytest.approx(42_000.0)
+        assert restored._monthly_revenue["2026-01"] == pytest.approx(42_000.0)
+        assert restored.strategies["ai_services"]["clients"] == 7
+
+    def test_save_is_noop_without_state_file(self):
+        """save() must not raise when no state file is configured."""
+        engine = AutonomousRevenueEngine()
+        engine.save()  # should simply do nothing
+
+    async def test_generate_revenue_persists(self, tmp_path):
+        """A revenue cycle writes the state file when configured."""
+        import os
+
+        state_file = str(tmp_path / "rev.json")
+        engine = AutonomousRevenueEngine(state_file=state_file)
+        await engine.generate_revenue()
+        assert os.path.exists(state_file)
+
 
 class TestAPEXOrchestrator:
     """Test APEXOrchestrator"""
@@ -144,6 +172,20 @@ class TestAPEXOrchestrator:
         revenue = await orchestrator.generate_revenue_cycle()
         assert isinstance(revenue, float)
         assert revenue >= 0.0
+
+    def test_has_breakthrough_engine(self):
+        orchestrator = APEXOrchestrator()
+        assert orchestrator.breakthrough_engine is not None
+        assert orchestrator.breakthrough_engine.breakthroughs == []
+
+    async def test_discover_breakthroughs(self):
+        orchestrator = APEXOrchestrator()
+        portfolio = await orchestrator.discover_breakthroughs(count=4)
+        assert len(portfolio) == 4
+        # Engine retains the generated candidates
+        assert len(orchestrator.breakthrough_engine.breakthroughs) == 4
+        scores = [b.score for b in portfolio]
+        assert scores == sorted(scores, reverse=True)
 
     async def test_monitor_health_all_healthy(self):
         orchestrator = APEXOrchestrator()

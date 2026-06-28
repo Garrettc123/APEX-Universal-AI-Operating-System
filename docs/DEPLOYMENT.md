@@ -94,7 +94,52 @@ kubectl get svc apex-ai-os-service
 
 ## Environment Variables
 
-Required environment variables:
+The app is **safe by default**: it boots with no configuration and every paid /
+external integration stays dormant until its variables are set. See
+`.env.example` for the full list. Feature-gating summary:
+
+| Capability | Env vars | Effect when unset |
+|------------|----------|-------------------|
+| CORS | `ALLOWED_ORIGINS` | allows `*` (dev only) |
+| Live checkout | `STRIPE_SECRET_KEY`, `STRIPE_PRICE_*`, `CHECKOUT_*_URL` | `POST /api/checkout` → 503 |
+| Stripe webhooks | `STRIPE_WEBHOOK_SECRET` | `POST /api/webhooks/stripe` → 503 |
+| DB persistence + entitlements | `DATABASE_URL` (+ `pip install "psycopg[binary]"`) | JSON file / in-memory fallback |
+| Revenue JSON fallback | `APEX_STATE_FILE` | in-memory only |
+| Premium gating | `ENFORCE_ENTITLEMENTS=true` | premium endpoints open |
+
+### Premium feature gating
+
+With `ENFORCE_ENTITLEMENTS=true`, premium endpoints (e.g.
+`GET /api/breakthroughs`) require an `X-Customer-Id` header for a customer with
+active access:
+
+- missing header → `401`
+- known customer without an active subscription → `402 Payment Required`
+- active subscription → `200`
+
+Entitlements are granted/revoked automatically by Stripe webhooks and can be
+inspected via `GET /api/entitlements/{customer_id}`. The applied DB schema lives
+in `supabase/migrations/0001_init.sql`.
+
+### Vercel Connect (third-party tokens)
+
+`src/vercel_connect.py` consumes [Vercel Connect](https://vercel.com/docs/connect)
+connectors (e.g. a `github/acme-github` GitHub connector) to obtain scoped
+third-party tokens without storing long-lived secrets. It exchanges the
+project's `VERCEL_OIDC_TOKEN` over the HTTP API (the Python equivalent of the
+`@vercel/connect` SDK, since this is a Python app).
+
+Setup (run from a directory with `vercel.json`, authenticated Vercel CLI):
+
+```bash
+vercel connect create github --name acme-github   # opens a browser to authorize
+vercel env pull                                    # pulls VERCEL_OIDC_TOKEN locally
+```
+
+Then in code: `vercel_connect.get_token("github/acme-github")` returns a scoped
+token (or `None` when `VERCEL_OIDC_TOKEN` is unset — safe by default).
+
+### Infrastructure variables
 
 - `DATABASE_URL` - PostgreSQL connection string
 - `MONGODB_URI` - MongoDB connection string

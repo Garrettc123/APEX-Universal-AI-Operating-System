@@ -41,6 +41,15 @@ USER apex
 # Expose port
 EXPOSE 8000
 
+# Runtime configuration (override at deploy time):
+#   ALLOWED_ORIGINS        comma-separated CORS origins (defaults to "*")
+#   STRIPE_SECRET_KEY      enables live checkout
+#   STRIPE_WEBHOOK_SECRET  enables webhook signature verification
+#   DATABASE_URL           enables Postgres persistence + entitlements
+#   ENFORCE_ENTITLEMENTS   set "true" to gate premium endpoints
+#   APEX_STATE_FILE        JSON revenue-state fallback when no DB
+ENV PORT=8000
+
 # Health check
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
     CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')" || exit 1
