@@ -17,15 +17,25 @@ jobs:
         run: |
           echo "has_token=${{ secrets.GITHUB_TOKEN != '' }}" >> "$GITHUB_OUTPUT"
 
-      - name: Auto-merge ready PRs
+      - name: Auto-merge ready Copilot PRs
         if: steps.secrets-check.outputs.has_token == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          OPEN_PRS=$(gh pr list --repo ${{ github.repository }} --state open --json number,isDraft,mergeable 2>/dev/null || echo '[]')
-          echo "$OPEN_PRS" | jq -r '.[] | select(.isDraft == false) | .number' | while read PR_NUM; do
-            MERGEABLE=$(echo "$OPEN_PRS" | jq -r --argjson n $PR_NUM '.[] | select(.number == $n) | .mergeable')
-            if [ "$MERGEABLE" = "MERGEABLE" ]; then
-              gh pr merge $PR_NUM --repo ${{ github.repository }} --squash --auto --delete-branch 2>/dev/null || true
-            fi
+          set -euo pipefail
+          # Only ever touch PRs authored by Copilot — never human-authored PRs.
+          OPEN_PRS=$(gh pr list --repo "${{ github.repository }}" --state open \
+            --json number,isDraft,mergeStateStatus,author 2>/dev/null || echo '[]')
+
+          echo "$OPEN_PRS" | jq -r '
+            .[]
+            | select(.isDraft == false)
+            | select((.author.login // "") | ascii_downcase | test("copilot"))
+            # CLEAN = mergeable AND all required checks have passed.
+            | select(.mergeStateStatus == "CLEAN")
+            | .number
+          ' | while read -r PR_NUM; do
+            echo "Auto-merging Copilot PR #$PR_NUM"
+            gh pr merge "$PR_NUM" --repo "${{ github.repository }}" \
+              --squash --auto --delete-branch || true
           done
