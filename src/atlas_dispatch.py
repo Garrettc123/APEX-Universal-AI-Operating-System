@@ -15,9 +15,10 @@ dispatch endpoint returns 503 rather than crashing at import time.
 Optional dependency: ``pip install supabase httpx``
 """
 
-import asyncio
+import hmac
 import logging
 import os
+import time
 from datetime import datetime, timezone
 from typing import List, Optional
 
@@ -65,7 +66,8 @@ def verify(creds: Optional[HTTPAuthorizationCredentials] = Security(security)) -
     expected = atlas_api_key()
     if not expected:
         raise HTTPException(503, "ATLAS dispatch not configured (ATLAS_API_KEY unset)")
-    if creds is None or creds.credentials != expected:
+    # Constant-time comparison to avoid leaking the key via response timing.
+    if creds is None or not hmac.compare_digest(creds.credentials, expected):
         raise HTTPException(401, "Invalid API key")
     return creds.credentials
 
@@ -162,7 +164,7 @@ async def handle_notify(sb, wid: str, payload: dict) -> dict:
 
     amount = payload.get("data", {}).get("object", {}).get("amount", 0)
     etype = payload.get("type", "event")
-    async with httpx.AsyncClient() as c:
+    async with httpx.AsyncClient(timeout=10.0) as c:
         await c.post(
             f"https://ntfy.sh/{ntfy_topic()}",
             content=f"⚡ {etype} | ${amount / 100:.2f}",
@@ -214,9 +216,9 @@ async def dispatch(req: DispatchReq, _: str = Depends(verify)):
         tid = rec.data[0]["id"] if rec.data else None
 
         try:
-            t0 = asyncio.get_event_loop().time()
+            t0 = time.perf_counter()
             result = await handler(sb, req.webhook_event_id, req.payload)
-            ms = int((asyncio.get_event_loop().time() - t0) * 1000)
+            ms = int((time.perf_counter() - t0) * 1000)
             if tid:
                 sb.table("atlas_tasks").update(
                     dict(
