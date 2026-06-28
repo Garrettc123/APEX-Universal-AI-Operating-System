@@ -12,6 +12,9 @@ from src.breakthrough_engine import BreakthroughEngine
 
 STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
 
+from src.dashboard_api import router as dashboard_router
+from src.integrations_api import router as integrations_router
+
 app = FastAPI(title="APEX AI OS", version="1.0.0")
 
 # FIX: Load allowed origins from env var instead of wildcard "*"
@@ -63,6 +66,12 @@ async def require_active_entitlement(x_customer_id: str | None = Header(default=
     if not entitlements.has_active_access(x_customer_id):
         raise HTTPException(status_code=402, detail="Active subscription required. See /pricing")
     return x_customer_id
+
+
+# Mobile command dashboard + integrations hub APIs (consumed by the native
+# Android app in android/)
+app.include_router(dashboard_router)
+app.include_router(integrations_router)
 
 
 @app.get("/")
