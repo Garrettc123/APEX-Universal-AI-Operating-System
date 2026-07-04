@@ -82,22 +82,8 @@ jobs:
           ERRORS=0
 
           while IFS= read -r -d '' f; do
-            # Check if JSON is valid and reformat if needed
-            if python3 -m json.tool "$f" > /tmp/formatted.json 2>/dev/null; then
-              BEFORE=$(sha256sum "$f" | awk '{print $1}')
-              # Only rewrite if content actually differs (ignore whitespace differences in keys)
-              python3 -c "
-          import json, sys
-          with open('$f') as fh:
-              original = json.load(fh)
-          with open('/tmp/formatted.json') as fh:
-              formatted = json.load(fh)
-          if original == formatted:
-              sys.exit(0)
-          else:
-              sys.exit(1)
-          " 2>/dev/null && true  # Same content, skip
-            else
+            # Check if JSON is valid; report errors but do not rewrite (risky for arbitrary JSON)
+            if ! python3 -m json.tool "$f" > /dev/null 2>&1; then
               ERRORS=$((ERRORS + 1))
               echo "::warning::Invalid JSON (cannot auto-fix): $f"
             fi
@@ -149,7 +135,7 @@ jobs:
           Commit: ${{ github.sha }}
 
           Changes:
-          $(git diff --cached --stat HEAD~1 2>/dev/null || echo 'See diff for details')"
+          $(git diff --stat HEAD 2>/dev/null || echo 'See diff for details')"
 
           echo "no_changes=false" >> "$GITHUB_OUTPUT"
           echo "Remediation changes committed."

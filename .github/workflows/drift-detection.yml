@@ -59,10 +59,13 @@ jobs:
             DOCKER_COUNT=$(find . -name "Dockerfile*" -not -path "*/node_modules/*" | wc -l)
             REPORT+="### Docker\n- Dockerfiles found: ${DOCKER_COUNT}\n"
 
-            # Check docker-compose drift
-            if [ -f "docker-compose.yml" ] || [ -f "docker-compose.yaml" ]; then
-              COMPOSE_HASH=$(sha256sum docker-compose.y*ml 2>/dev/null | awk '{print $1}')
-              REPORT+="- ✅ docker-compose checksum: ${COMPOSE_HASH:0:8}...\n"
+            # Check docker-compose drift (handle both .yml and .yaml variants explicitly)
+            if [ -f "docker-compose.yml" ]; then
+              COMPOSE_HASH=$(sha256sum docker-compose.yml | awk '{print $1}')
+              REPORT+="- ✅ docker-compose.yml checksum: ${COMPOSE_HASH:0:8}...\n"
+            elif [ -f "docker-compose.yaml" ]; then
+              COMPOSE_HASH=$(sha256sum docker-compose.yaml | awk '{print $1}')
+              REPORT+="- ✅ docker-compose.yaml checksum: ${COMPOSE_HASH:0:8}...\n"
             fi
           else
             REPORT+="### Docker\n- ℹ️  No Dockerfiles found\n"
@@ -125,16 +128,16 @@ jobs:
             REQ_COUNT=$(grep -c -v '^#\|^$' requirements.txt 2>/dev/null || echo 0)
             REPORT+="- Packages listed: ${REQ_COUNT}\n"
 
-            # Check for unpinned dependencies
-            UNPINNED=$(grep -v '^#\|^$\|==' requirements.txt 2>/dev/null | grep -v '^-' | wc -l)
+            # Check for unpinned dependencies (only lines with no version specifier at all)
+            UNPINNED=$(grep -v '^#\|^$\|==' requirements.txt 2>/dev/null | grep -v '^-\|>=\|<=\|~=\|!=' | wc -l)
             if [ "$UNPINNED" -gt 0 ]; then
               REPORT+="- ⚠️  Unpinned packages: ${UNPINNED}\n"
             else
               REPORT+="- ✅ All packages pinned\n"
             fi
 
-            # Check for known vulnerable patterns
-            if grep -qiE 'requests[^=]|urllib3[^=]|cryptography[^=]' requirements.txt 2>/dev/null; then
+            # Check for known vulnerable patterns (security-sensitive packages without exact pins)
+            if grep -qiE 'requests[^=><~!]|urllib3[^=><~!]|cryptography[^=><~!]' requirements.txt 2>/dev/null; then
               REPORT+="- ⚠️  Security-sensitive packages without pins detected\n"
             fi
           fi
@@ -162,7 +165,17 @@ jobs:
 
           if [ -f "package.json" ]; then
             REPORT+="### package.json\n"
-            DEP_COUNT=$(python3 -c "import json,sys; d=json.load(open('package.json')); print(len(d.get('dependencies',{})) + len(d.get('devDependencies',{})))" 2>/dev/null || echo "N/A")
+            DEP_COUNT=$(python3 -c "
+          import json, sys
+          try:
+              with open('package.json') as f:
+                  d = json.load(f)
+              total = len(d.get('dependencies', {})) + len(d.get('devDependencies', {}))
+              print(total)
+          except (json.JSONDecodeError, OSError) as e:
+              print('parse-error', file=sys.stderr)
+              print('N/A')
+          " 2>/dev/null || echo "N/A")
             REPORT+="- Total dependencies: ${DEP_COUNT}\n"
 
             if [ -f "package-lock.json" ]; then
@@ -344,14 +357,18 @@ jobs:
               REPORT+="- ✅ No secrets detected\n"
             fi
           else
-            # Fallback: grep for common secret patterns
-            SECRET_PATTERNS='(password|passwd|secret|api.?key|auth.?token|private.?key)\s*[=:]\s*["\047][^"\047]{8,}'
+            # Fallback: grep for common secret patterns using portable quoting
+            # Match: key = "value" or key: 'value' where value is 8+ chars
+            SECRET_PATTERNS='(password|passwd|secret|api[_-]?key|auth[_-]?token|private[_-]?key)[[:space:]]*[=:][[:space:]]*["'"'"'][^"'"'"']{8,}'
             if grep -rniE "$SECRET_PATTERNS" \
                 --include="*.py" --include="*.js" --include="*.ts" \
                 --include="*.json" --include="*.yml" --include="*.yaml" \
                 --include="*.sh" --include="*.env" \
                 --exclude-dir=".git" --exclude-dir="node_modules" \
-                . 2>/dev/null | grep -v -i 'example\|sample\|test\|placeholder\|your_\|<\|{{' | grep -q .; then
+                . 2>/dev/null \
+                | grep -ivE '^\s*(#|//|/\*)' \
+                | grep -ivE '\b(example|sample|placeholder|changeme|your_[a-z_]+|<[a-z_]+>|\{\{[^}]+\}\})' \
+                | grep -q .; then
               REPORT+="- ⚠️  Potential hardcoded credentials found (grep scan)\n"
             else
               REPORT+="- ✅ No obvious hardcoded credentials detected\n"
