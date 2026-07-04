@@ -1,0 +1,218 @@
+name: Drift Remediation
+
+on:
+  workflow_run:
+    workflows: ["Drift Detection"]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      remediation_type:
+        description: 'Type of remediation to run'
+        required: false
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - dependencies
+          - config
+          - formatting
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+jobs:
+  # ─────────────────────────────────────────────────────────────
+  auto-remediate-dependencies:
+    name: Auto-Remediate Dependency Drift
+    runs-on: ubuntu-latest
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success')
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Python
+        if: hashFiles('requirements*.txt', 'pyproject.toml', 'setup.py', 'Pipfile') != ''
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Set up Node.js
+        if: hashFiles('package.json') != ''
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Remediate Python dependency pins
+        id: python-remediation
+        if: hashFiles('requirements.txt') != ''
+        run: |
+          CHANGED=false
+
+          # Install pip-tools for dependency management
+          pip install --quiet pip-tools 2>/dev/null || true
+
+          # Sort and deduplicate requirements.txt
+          if [ -f "requirements.txt" ]; then
+            BEFORE=$(sha256sum requirements.txt | awk '{print $1}')
+            # Remove duplicate lines while preserving order
+            awk '!seen[$0]++' requirements.txt > /tmp/req-dedup.txt
+            # Sort (keeping comments at top)
+            grep '^#' /tmp/req-dedup.txt > /tmp/req-sorted.txt 2>/dev/null || true
+            grep -v '^#\|^$' /tmp/req-dedup.txt | sort >> /tmp/req-sorted.txt
+            mv /tmp/req-sorted.txt requirements.txt
+            AFTER=$(sha256sum requirements.txt | awk '{print $1}')
+            if [ "$BEFORE" != "$AFTER" ]; then
+              CHANGED=true
+              echo "requirements.txt deduplicated and sorted"
+            fi
+          fi
+
+          echo "changed=${CHANGED}" >> "$GITHUB_OUTPUT"
+
+      - name: Remediate JSON formatting
+        id: json-remediation
+        run: |
+          CHANGED=false
+          ERRORS=0
+
+          while IFS= read -r -d '' f; do
+            # Check if JSON is valid; report errors but do not rewrite (risky for arbitrary JSON)
+            if ! python3 -m json.tool "$f" > /dev/null 2>&1; then
+              ERRORS=$((ERRORS + 1))
+              echo "::warning::Invalid JSON (cannot auto-fix): $f"
+            fi
+          done < <(find . -name "*.json" -not -path "*/node_modules/*" -not -path "*/.git/*" \
+                         -not -name "package-lock.json" -not -name "yarn.lock" -print0)
+
+          echo "changed=${CHANGED}" >> "$GITHUB_OUTPUT"
+          echo "errors=${ERRORS}" >> "$GITHUB_OUTPUT"
+
+      - name: Remediate YAML formatting
+        id: yaml-remediation
+        run: |
+          pip install --quiet yamllint 2>/dev/null || true
+
+          REPORT="### YAML Validation\n"
+          ISSUES=0
+
+          while IFS= read -r -d '' f; do
+            if ! python3 -c "import yaml; yaml.safe_load(open('$f'))" 2>/dev/null; then
+              ISSUES=$((ISSUES + 1))
+              echo "::warning::Invalid YAML (cannot auto-fix): $f"
+              REPORT+="- ❌ $f\n"
+            fi
+          done < <(find . \( -name "*.yml" -o -name "*.yaml" \) \
+                       -not -path "*/.git/*" -not -path "*/node_modules/*" -print0)
+
+          if [ "$ISSUES" -eq 0 ]; then
+            REPORT+="- ✅ All YAML files valid\n"
+          fi
+
+          printf '%b' "${REPORT}"
+
+      - name: Configure git for auto-commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Commit remediation changes
+        id: commit
+        run: |
+          git diff --quiet && echo "no_changes=true" >> "$GITHUB_OUTPUT" && exit 0
+
+          git add -A
+          TIMESTAMP=$(date -u '+%Y-%m-%d %H:%M:%S UTC')
+          git commit -m "chore(drift-remediation): auto-remediate detected drift [skip ci]
+
+          Automated drift remediation triggered by drift-detection workflow.
+          Timestamp: ${TIMESTAMP}
+          Commit: ${{ github.sha }}
+
+          Changes:
+          $(git diff --stat HEAD 2>/dev/null || echo 'See diff for details')"
+
+          echo "no_changes=false" >> "$GITHUB_OUTPUT"
+          echo "Remediation changes committed."
+
+      - name: Push remediation commit
+        if: steps.commit.outputs.no_changes == 'false'
+        run: |
+          git push origin HEAD:${{ github.ref_name }} || {
+            echo "::warning::Could not push remediation — branch may be protected. Creating summary instead."
+          }
+
+  # ─────────────────────────────────────────────────────────────
+  create-drift-issue:
+    name: Create Drift Issue (if needed)
+    runs-on: ubuntu-latest
+    needs: [auto-remediate-dependencies]
+    if: >
+      always() &&
+      (github.event_name == 'workflow_dispatch' ||
+       github.event_name == 'workflow_run')
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download drift report artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: drift-detection-report-${{ github.sha }}
+          path: /tmp/drift-reports
+        continue-on-error: true
+
+      - name: Check for open drift issues
+        id: check-issues
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const issues = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              labels: 'drift-detected',
+              state: 'open'
+            });
+            core.setOutput('open_count', issues.data.length);
+            return issues.data.length;
+
+      - name: Create or update drift issue
+        if: steps.check-issues.outputs.open_count == '0'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const timestamp = new Date().toISOString();
+            let reportBody = '';
+            try {
+              reportBody = fs.readFileSync('/tmp/drift-reports/drift-detection-report.md', 'utf8');
+            } catch (e) {
+              reportBody = 'No report file available — check workflow artifacts.';
+            }
+
+            const body = `## 🔍 Drift Detected
+
+            **Repository:** \`${context.repo.owner}/${context.repo.repo}\`
+            **Detected at:** ${timestamp}
+            **Workflow run:** [View run](https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${{ github.run_id }})
+
+            ---
+
+            ${reportBody.substring(0, 60000)}
+
+            ---
+
+            _This issue was automatically created by the Drift Detection workflow._
+            _It will be closed automatically once drift is resolved._`;
+
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `🔍 Drift Detected — ${new Date().toLocaleDateString()}`,
+              body: body,
+              labels: ['drift-detected', 'automated']
+            });
