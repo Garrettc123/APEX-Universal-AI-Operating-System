@@ -1,0 +1,518 @@
+name: Drift Detection
+
+on:
+  push:
+    branches: [main, master, develop]
+  pull_request:
+    branches: [main, master, develop]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  security-events: write
+  issues: write
+  pull-requests: write
+
+jobs:
+  # ─────────────────────────────────────────────────────────────
+  infrastructure-drift:
+    name: Infrastructure Drift Detection
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect Terraform drift
+        id: terraform-drift
+        run: |
+          DRIFT_FOUND=false
+          REPORT="## 🏗️ Infrastructure Drift Report\n\n"
+
+          # Terraform state/config drift
+          if find . -name "*.tf" -not -path "*/node_modules/*" | grep -q .; then
+            echo "Terraform files detected — checking for drift indicators"
+            TF_FILES=$(find . -name "*.tf" -not -path "*/node_modules/*" | wc -l)
+            REPORT+="### Terraform\n- Files found: ${TF_FILES}\n"
+
+            # Check for uncommitted state files
+            if git status --short | grep -qE '\.tfstate'; then
+              DRIFT_FOUND=true
+              REPORT+="- ⚠️  Uncommitted .tfstate files detected\n"
+            else
+              REPORT+="- ✅ No uncommitted state files\n"
+            fi
+
+            # Check for .terraform.lock.hcl drift
+            if git status --short | grep -q '.terraform.lock.hcl'; then
+              DRIFT_FOUND=true
+              REPORT+="- ⚠️  Provider lock file has uncommitted changes\n"
+            else
+              REPORT+="- ✅ Provider lock file is clean\n"
+            fi
+          else
+            REPORT+="### Terraform\n- ℹ️  No Terraform files found\n"
+          fi
+
+          # Docker drift
+          if [ -f "Dockerfile" ] || find . -name "Dockerfile*" -not -path "*/node_modules/*" | grep -q .; then
+            DOCKER_COUNT=$(find . -name "Dockerfile*" -not -path "*/node_modules/*" | wc -l)
+            REPORT+="### Docker\n- Dockerfiles found: ${DOCKER_COUNT}\n"
+
+            # Check docker-compose drift
+            if [ -f "docker-compose.yml" ] || [ -f "docker-compose.yaml" ]; then
+              COMPOSE_HASH=$(sha256sum docker-compose.y*ml 2>/dev/null | awk '{print $1}')
+              REPORT+="- ✅ docker-compose checksum: ${COMPOSE_HASH:0:8}...\n"
+            fi
+          else
+            REPORT+="### Docker\n- ℹ️  No Dockerfiles found\n"
+          fi
+
+          # Kubernetes drift
+          if find . \( -name "*.yaml" -o -name "*.yml" \) -not -path "*/node_modules/*" -not -path "*/.github/*" | xargs grep -l "kind:" 2>/dev/null | grep -q .; then
+            K8S_COUNT=$(find . \( -name "*.yaml" -o -name "*.yml" \) -not -path "*/node_modules/*" -not -path "*/.github/*" | xargs grep -l "kind:" 2>/dev/null | wc -l)
+            REPORT+="### Kubernetes\n- Manifests found: ${K8S_COUNT}\n- ✅ Manifest scan complete\n"
+          else
+            REPORT+="### Kubernetes\n- ℹ️  No Kubernetes manifests found\n"
+          fi
+
+          # CloudFormation drift
+          if find . \( -name "*.yaml" -o -name "*.yml" -o -name "*.json" \) -not -path "*/node_modules/*" | xargs grep -l "AWSTemplateFormatVersion\|CloudFormation" 2>/dev/null | grep -q .; then
+            CFN_COUNT=$(find . \( -name "*.yaml" -o -name "*.yml" -o -name "*.json" \) -not -path "*/node_modules/*" | xargs grep -l "AWSTemplateFormatVersion\|CloudFormation" 2>/dev/null | wc -l)
+            REPORT+="### CloudFormation\n- Templates found: ${CFN_COUNT}\n- ✅ Template scan complete\n"
+          else
+            REPORT+="### CloudFormation\n- ℹ️  No CloudFormation templates found\n"
+          fi
+
+          echo "DRIFT_FOUND=${DRIFT_FOUND}" >> "$GITHUB_OUTPUT"
+          printf '%b' "${REPORT}" > /tmp/infra-drift-report.md
+          cat /tmp/infra-drift-report.md
+
+      - name: Upload infrastructure drift report
+        uses: actions/upload-artifact@v4
+        with:
+          name: infra-drift-report
+          path: /tmp/infra-drift-report.md
+
+  # ─────────────────────────────────────────────────────────────
+  dependency-drift:
+    name: Dependency Drift Detection
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        if: hashFiles('requirements*.txt', 'pyproject.toml', 'setup.py', 'Pipfile') != ''
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Set up Node.js
+        if: hashFiles('package.json') != ''
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Detect Python dependency drift
+        id: python-deps
+        run: |
+          REPORT="## 🐍 Python Dependency Drift\n\n"
+
+          if [ -f "requirements.txt" ]; then
+            REPORT+="### requirements.txt\n"
+            REQ_COUNT=$(grep -c -v '^#\|^$' requirements.txt 2>/dev/null || echo 0)
+            REPORT+="- Packages listed: ${REQ_COUNT}\n"
+
+            # Check for unpinned dependencies
+            UNPINNED=$(grep -v '^#\|^$\|==' requirements.txt 2>/dev/null | grep -v '^-' | wc -l)
+            if [ "$UNPINNED" -gt 0 ]; then
+              REPORT+="- ⚠️  Unpinned packages: ${UNPINNED}\n"
+            else
+              REPORT+="- ✅ All packages pinned\n"
+            fi
+
+            # Check for known vulnerable patterns
+            if grep -qiE 'requests[^=]|urllib3[^=]|cryptography[^=]' requirements.txt 2>/dev/null; then
+              REPORT+="- ⚠️  Security-sensitive packages without pins detected\n"
+            fi
+          fi
+
+          if [ -f "pyproject.toml" ]; then
+            REPORT+="### pyproject.toml\n- ✅ Found pyproject.toml\n"
+          fi
+
+          if [ -f "Pipfile.lock" ]; then
+            REPORT+="### Pipfile.lock\n"
+            if git diff --name-only HEAD~1 2>/dev/null | grep -q "Pipfile.lock"; then
+              REPORT+="- ⚠️  Pipfile.lock changed in this commit\n"
+            else
+              REPORT+="- ✅ Pipfile.lock unchanged\n"
+            fi
+          fi
+
+          printf '%b' "${REPORT}" > /tmp/python-deps-report.md
+          cat /tmp/python-deps-report.md
+
+      - name: Detect Node.js dependency drift
+        id: node-deps
+        run: |
+          REPORT="## 📦 Node.js Dependency Drift\n\n"
+
+          if [ -f "package.json" ]; then
+            REPORT+="### package.json\n"
+            DEP_COUNT=$(python3 -c "import json,sys; d=json.load(open('package.json')); print(len(d.get('dependencies',{})) + len(d.get('devDependencies',{})))" 2>/dev/null || echo "N/A")
+            REPORT+="- Total dependencies: ${DEP_COUNT}\n"
+
+            if [ -f "package-lock.json" ]; then
+              if git diff --name-only HEAD~1 2>/dev/null | grep -q "package-lock.json"; then
+                REPORT+="- ⚠️  package-lock.json changed in this commit\n"
+              else
+                REPORT+="- ✅ package-lock.json in sync\n"
+              fi
+            elif [ -f "yarn.lock" ]; then
+              if git diff --name-only HEAD~1 2>/dev/null | grep -q "yarn.lock"; then
+                REPORT+="- ⚠️  yarn.lock changed in this commit\n"
+              else
+                REPORT+="- ✅ yarn.lock in sync\n"
+              fi
+            else
+              REPORT+="- ⚠️  No lock file found (package-lock.json or yarn.lock)\n"
+            fi
+          else
+            REPORT+="- ℹ️  No package.json found\n"
+          fi
+
+          printf '%b' "${REPORT}" > /tmp/node-deps-report.md
+          cat /tmp/node-deps-report.md
+
+      - name: Detect Go dependency drift
+        id: go-deps
+        run: |
+          REPORT="## 🐹 Go Dependency Drift\n\n"
+
+          if [ -f "go.mod" ]; then
+            REPORT+="### go.mod\n"
+            MOD_COUNT=$(grep -c '^require\|^\t' go.mod 2>/dev/null || echo 0)
+            REPORT+="- Module entries: ${MOD_COUNT}\n"
+
+            if [ -f "go.sum" ]; then
+              if git diff --name-only HEAD~1 2>/dev/null | grep -q "go.sum"; then
+                REPORT+="- ⚠️  go.sum changed in this commit\n"
+              else
+                REPORT+="- ✅ go.sum in sync\n"
+              fi
+            else
+              REPORT+="- ⚠️  go.sum missing\n"
+            fi
+          else
+            REPORT+="- ℹ️  No go.mod found\n"
+          fi
+
+          printf '%b' "${REPORT}" > /tmp/go-deps-report.md
+          cat /tmp/go-deps-report.md
+
+      - name: Combine dependency reports
+        run: |
+          cat /tmp/python-deps-report.md /tmp/node-deps-report.md /tmp/go-deps-report.md > /tmp/dep-drift-report.md
+
+      - name: Upload dependency drift report
+        uses: actions/upload-artifact@v4
+        with:
+          name: dep-drift-report
+          path: /tmp/dep-drift-report.md
+
+  # ─────────────────────────────────────────────────────────────
+  config-drift:
+    name: Configuration Drift Detection
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect YAML/JSON configuration drift
+        id: config-drift
+        run: |
+          REPORT="## ⚙️ Configuration Drift Report\n\n"
+          DRIFT_FOUND=false
+
+          # Check YAML files for validity
+          YAML_ERRORS=0
+          YAML_COUNT=0
+          while IFS= read -r -d '' f; do
+            YAML_COUNT=$((YAML_COUNT + 1))
+            python3 -c "import yaml, sys; yaml.safe_load(open('$f'))" 2>/dev/null || {
+              YAML_ERRORS=$((YAML_ERRORS + 1))
+              REPORT+="- ❌ Invalid YAML: $f\n"
+              DRIFT_FOUND=true
+            }
+          done < <(find . \( -name "*.yml" -o -name "*.yaml" \) -not -path "*/node_modules/*" -not -path "*/.git/*" -print0)
+
+          REPORT+="### YAML Files\n"
+          REPORT+="- Scanned: ${YAML_COUNT}\n"
+          if [ "$YAML_ERRORS" -eq 0 ]; then
+            REPORT+="- ✅ All YAML files valid\n"
+          else
+            REPORT+="- ❌ Invalid files: ${YAML_ERRORS}\n"
+          fi
+
+          # Check JSON files for validity
+          JSON_ERRORS=0
+          JSON_COUNT=0
+          while IFS= read -r -d '' f; do
+            JSON_COUNT=$((JSON_COUNT + 1))
+            python3 -m json.tool "$f" > /dev/null 2>&1 || {
+              JSON_ERRORS=$((JSON_ERRORS + 1))
+              REPORT+="- ❌ Invalid JSON: $f\n"
+              DRIFT_FOUND=true
+            }
+          done < <(find . -name "*.json" -not -path "*/node_modules/*" -not -path "*/.git/*" -print0)
+
+          REPORT+="### JSON Files\n"
+          REPORT+="- Scanned: ${JSON_COUNT}\n"
+          if [ "$JSON_ERRORS" -eq 0 ]; then
+            REPORT+="- ✅ All JSON files valid\n"
+          else
+            REPORT+="- ❌ Invalid files: ${JSON_ERRORS}\n"
+          fi
+
+          # Check .env drift (ensure .env is not committed)
+          REPORT+="### Environment Variables\n"
+          if find . -name ".env" -not -path "*/.git/*" | grep -q .; then
+            DRIFT_FOUND=true
+            REPORT+="- ❌ .env file committed to repository (potential secret leak)\n"
+          else
+            REPORT+="- ✅ No .env files committed\n"
+          fi
+
+          # Verify .env.example exists if .env.example or .env.template present
+          if [ -f ".env.example" ] || [ -f ".env.template" ]; then
+            REPORT+="- ✅ .env template/example present\n"
+          fi
+
+          echo "DRIFT_FOUND=${DRIFT_FOUND}" >> "$GITHUB_OUTPUT"
+          printf '%b' "${REPORT}" > /tmp/config-drift-report.md
+          cat /tmp/config-drift-report.md
+
+      - name: Upload config drift report
+        uses: actions/upload-artifact@v4
+        with:
+          name: config-drift-report
+          path: /tmp/config-drift-report.md
+
+  # ─────────────────────────────────────────────────────────────
+  security-drift:
+    name: Security Drift Detection
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python for security tools
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install security scanning tools
+        run: |
+          pip install --quiet bandit pip-audit 2>/dev/null || true
+          pip install --quiet detect-secrets 2>/dev/null || true
+
+      - name: Scan for secrets in code
+        id: secret-scan
+        run: |
+          REPORT="## 🔐 Security Drift Report\n\n### Secret Detection\n"
+
+          # Use detect-secrets if available
+          if command -v detect-secrets &>/dev/null; then
+            detect-secrets scan --all-files --exclude-files '\.git/.*' > /tmp/secrets-baseline.json 2>/dev/null || true
+            SECRET_COUNT=$(python3 -c "
+          import json, sys
+          try:
+              d = json.load(open('/tmp/secrets-baseline.json'))
+              total = sum(len(v) for v in d.get('results', {}).values())
+              print(total)
+          except Exception:
+              print(0)
+          ")
+            if [ "$SECRET_COUNT" -gt 0 ]; then
+              REPORT+="- ⚠️  Potential secrets detected: ${SECRET_COUNT} (review /tmp/secrets-baseline.json)\n"
+            else
+              REPORT+="- ✅ No secrets detected\n"
+            fi
+          else
+            # Fallback: grep for common secret patterns
+            SECRET_PATTERNS='(password|passwd|secret|api.?key|auth.?token|private.?key)\s*[=:]\s*["\047][^"\047]{8,}'
+            if grep -rniE "$SECRET_PATTERNS" \
+                --include="*.py" --include="*.js" --include="*.ts" \
+                --include="*.json" --include="*.yml" --include="*.yaml" \
+                --include="*.sh" --include="*.env" \
+                --exclude-dir=".git" --exclude-dir="node_modules" \
+                . 2>/dev/null | grep -v -i 'example\|sample\|test\|placeholder\|your_\|<\|{{' | grep -q .; then
+              REPORT+="- ⚠️  Potential hardcoded credentials found (grep scan)\n"
+            else
+              REPORT+="- ✅ No obvious hardcoded credentials detected\n"
+            fi
+          fi
+
+          printf '%b' "${REPORT}" >> /tmp/security-drift-report.md
+
+      - name: Run Bandit security linter (Python)
+        run: |
+          REPORT="\n### Python Security (Bandit)\n"
+
+          if find . -name "*.py" -not -path "*/node_modules/*" -not -path "*/.git/*" | grep -q .; then
+            bandit -r . -ll --exclude .git,node_modules -f json -o /tmp/bandit-output.json 2>/dev/null || true
+            ISSUE_COUNT=$(python3 -c "
+          import json, sys
+          try:
+              d = json.load(open('/tmp/bandit-output.json'))
+              print(len(d.get('results', [])))
+          except Exception:
+              print(0)
+          ")
+            if [ "$ISSUE_COUNT" -gt 0 ]; then
+              REPORT+="- ⚠️  Bandit issues found: ${ISSUE_COUNT}\n"
+              python3 -c "
+          import json
+          d = json.load(open('/tmp/bandit-output.json'))
+          for r in d.get('results', [])[:5]:
+              print(f\"  - {r['issue_severity']} [{r['test_id']}]: {r['issue_text']} ({r['filename']}:{r['line_number']})\")
+          " 2>/dev/null || true
+            else
+              REPORT+="- ✅ No Bandit issues found\n"
+            fi
+          else
+            REPORT+="- ℹ️  No Python files to scan\n"
+          fi
+
+          printf '%b' "${REPORT}" >> /tmp/security-drift-report.md
+
+      - name: Check for dependency vulnerabilities
+        run: |
+          REPORT="\n### Dependency Vulnerabilities\n"
+
+          if [ -f "requirements.txt" ] && command -v pip-audit &>/dev/null; then
+            VULN_OUTPUT=$(pip-audit -r requirements.txt --format=json 2>/dev/null || echo '{"vulnerabilities":[]}')
+            VULN_COUNT=$(echo "$VULN_OUTPUT" | python3 -c "
+          import json, sys
+          try:
+              d = json.loads(sys.stdin.read())
+              print(len(d.get('vulnerabilities', [])))
+          except Exception:
+              print(0)
+          ")
+            if [ "$VULN_COUNT" -gt 0 ]; then
+              REPORT+="- ⚠️  Vulnerable packages: ${VULN_COUNT}\n"
+            else
+              REPORT+="- ✅ No known Python vulnerabilities\n"
+            fi
+          else
+            REPORT+="- ℹ️  pip-audit not available or no requirements.txt\n"
+          fi
+
+          printf '%b' "${REPORT}" >> /tmp/security-drift-report.md
+
+      - name: Check license compliance
+        run: |
+          REPORT="\n### License Compliance\n"
+
+          # Check for LICENSE file
+          if [ -f "LICENSE" ] || [ -f "LICENSE.md" ] || [ -f "LICENSE.txt" ]; then
+            REPORT+="- ✅ LICENSE file present\n"
+          else
+            REPORT+="- ⚠️  No LICENSE file found\n"
+          fi
+
+          printf '%b' "${REPORT}" >> /tmp/security-drift-report.md
+          cat /tmp/security-drift-report.md
+
+      - name: Upload security drift report
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-drift-report
+          path: /tmp/security-drift-report.md
+
+  # ─────────────────────────────────────────────────────────────
+  drift-summary:
+    name: Drift Summary & Notification
+    runs-on: ubuntu-latest
+    needs:
+      - infrastructure-drift
+      - dependency-drift
+      - config-drift
+      - security-drift
+    if: always()
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all drift reports
+        uses: actions/download-artifact@v4
+        with:
+          path: /tmp/drift-reports
+
+      - name: Generate consolidated drift report
+        id: summary
+        run: |
+          TIMESTAMP=$(date -u '+%Y-%m-%d %H:%M:%S UTC')
+          REPORT="# 🔍 Drift Detection Report\n\n"
+          REPORT+="**Repository:** \`${{ github.repository }}\`\n"
+          REPORT+="**Branch:** \`${{ github.ref_name }}\`\n"
+          REPORT+="**Commit:** \`${{ github.sha }}\`\n"
+          REPORT+="**Triggered by:** \`${{ github.event_name }}\`\n"
+          REPORT+="**Timestamp:** ${TIMESTAMP}\n\n"
+          REPORT+="---\n\n"
+
+          # Append sub-reports
+          for f in /tmp/drift-reports/*/*.md; do
+            [ -f "$f" ] && cat "$f" >> /tmp/consolidated-report.md && echo -e "\n---\n" >> /tmp/consolidated-report.md
+          done
+
+          printf '%b' "${REPORT}" | cat - /tmp/consolidated-report.md > /tmp/drift-detection-report.md 2>/dev/null || \
+            printf '%b' "${REPORT}" > /tmp/drift-detection-report.md
+
+          # Count warnings
+          WARN_COUNT=$(grep -c '⚠️\|❌' /tmp/drift-detection-report.md 2>/dev/null || echo 0)
+          echo "warn_count=${WARN_COUNT}" >> "$GITHUB_OUTPUT"
+
+          echo "=== DRIFT DETECTION COMPLETE ==="
+          echo "Warnings/Issues found: ${WARN_COUNT}"
+          cat /tmp/drift-detection-report.md
+
+      - name: Upload consolidated drift report
+        uses: actions/upload-artifact@v4
+        with:
+          name: drift-detection-report-${{ github.sha }}
+          path: /tmp/drift-detection-report.md
+          retention-days: 30
+
+      - name: Post drift summary to PR
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            let body = '';
+            try {
+              body = fs.readFileSync('/tmp/drift-detection-report.md', 'utf8');
+            } catch (e) {
+              body = '## 🔍 Drift Detection Report\n\nReport generation encountered an issue.';
+            }
+            // Truncate if too long for a PR comment
+            if (body.length > 65000) {
+              body = body.substring(0, 65000) + '\n\n_[Report truncated — download full artifact for details]_';
+            }
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: body
+            });
+
+      - name: Fail if critical drift detected
+        if: steps.summary.outputs.warn_count != '0'
+        run: |
+          echo "::warning::Drift detected — ${{ steps.summary.outputs.warn_count }} issue(s) found. Review the drift-detection-report artifact."

@@ -1,0 +1,245 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Drift Detection Configuration
+# Applied to: Garrettc123/* repositories
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Global settings
+global:
+  enabled: true
+  fail_on_drift: false          # Set to true to fail the workflow on any drift
+  report_retention_days: 30
+  notification_channels:
+    - github_issues
+    - pr_comments
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Infrastructure Drift Detection
+# ─────────────────────────────────────────────────────────────────────────────
+infrastructure:
+  enabled: true
+
+  terraform:
+    enabled: true
+    check_state_files: true       # Alert on uncommitted .tfstate files
+    check_lock_file: true         # Alert when .terraform.lock.hcl drifts
+    state_file_patterns:
+      - "**/*.tfstate"
+      - "**/*.tfstate.backup"
+    exclude_paths:
+      - ".terraform/**"
+      - "node_modules/**"
+
+  docker:
+    enabled: true
+    check_compose: true           # Validate docker-compose.yml changes
+    check_dockerfiles: true
+    dockerfile_patterns:
+      - "Dockerfile"
+      - "Dockerfile.*"
+      - "**/Dockerfile"
+    base_image_check: false       # Requires registry access; disabled by default
+
+  kubernetes:
+    enabled: true
+    manifest_patterns:
+      - "**/*.yml"
+      - "**/*.yaml"
+    kind_detection: true          # Auto-detect k8s manifests by 'kind:' field
+    exclude_paths:
+      - ".github/**"
+      - "node_modules/**"
+
+  cloudformation:
+    enabled: true
+    template_patterns:
+      - "**/*.yml"
+      - "**/*.yaml"
+      - "**/*.json"
+    detection_keys:
+      - "AWSTemplateFormatVersion"
+      - "CloudFormation"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Dependency Drift Detection
+# ─────────────────────────────────────────────────────────────────────────────
+dependencies:
+  enabled: true
+
+  python:
+    enabled: true
+    check_unpinned: true          # Warn on unpinned packages
+    check_lock_sync: true         # Verify Pipfile.lock is in sync
+    files:
+      - requirements.txt
+      - requirements-dev.txt
+      - requirements-test.txt
+      - pyproject.toml
+      - Pipfile
+      - Pipfile.lock
+    severity_threshold: medium    # low | medium | high
+
+  nodejs:
+    enabled: true
+    check_lock_file: true         # Warn if lock file is missing
+    lock_files:
+      - package-lock.json
+      - yarn.lock
+      - pnpm-lock.yaml
+    check_outdated: false         # Requires network; disabled by default
+
+  go:
+    enabled: true
+    check_go_sum: true
+    files:
+      - go.mod
+      - go.sum
+
+  ruby:
+    enabled: true
+    files:
+      - Gemfile
+      - Gemfile.lock
+
+  java:
+    enabled: true
+    files:
+      - pom.xml
+      - build.gradle
+      - build.gradle.kts
+      - "**/*.gradle"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Configuration Drift Detection
+# ─────────────────────────────────────────────────────────────────────────────
+configuration:
+  enabled: true
+
+  yaml:
+    enabled: true
+    validate_syntax: true
+    exclude_patterns:
+      - "node_modules/**"
+      - ".git/**"
+      - "vendor/**"
+
+  json:
+    enabled: true
+    validate_syntax: true
+    exclude_patterns:
+      - "node_modules/**"
+      - ".git/**"
+      - "package-lock.json"      # These are large and managed by npm
+      - "yarn.lock"
+
+  environment:
+    enabled: true
+    check_committed_env: true    # Fail if .env files are committed
+    require_env_template: true   # Warn if no .env.example/.env.template
+    sensitive_patterns:
+      - ".env"
+      - ".env.local"
+      - ".env.production"
+      - ".env.staging"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Security Drift Detection
+# ─────────────────────────────────────────────────────────────────────────────
+security:
+  enabled: true
+
+  secrets:
+    enabled: true
+    tool: detect-secrets          # detect-secrets | gitleaks | grep-fallback
+    # Patterns to scan for potential secrets
+    scan_extensions:
+      - .py
+      - .js
+      - .ts
+      - .json
+      - .yml
+      - .yaml
+      - .sh
+      - .env
+    exclude_patterns:
+      - "*.test.*"
+      - "*.spec.*"
+      - "**/__tests__/**"
+      - "**/test/**"
+      - "**/tests/**"
+      - "**/*.example"
+
+  sast:
+    enabled: true
+    python:
+      tool: bandit
+      severity: medium            # low | medium | high
+      confidence: medium
+    javascript:
+      enabled: false              # Enable if ESLint security plugin is configured
+
+  vulnerabilities:
+    enabled: true
+    python:
+      tool: pip-audit
+      fail_on_vuln: false         # Advisory only; set true to enforce
+    nodejs:
+      tool: npm-audit
+      fail_on_vuln: false
+
+  licenses:
+    enabled: true
+    require_license_file: true    # Warn if no LICENSE file present
+    # Disallowed licenses (advisory only)
+    disallowed:
+      - AGPL-3.0
+      - GPL-3.0-only
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Auto-Remediation Settings
+# ─────────────────────────────────────────────────────────────────────────────
+remediation:
+  enabled: true
+  auto_commit: true
+  commit_message_prefix: "chore(drift-remediation)"
+  skip_ci_on_commit: true         # Add [skip ci] to remediation commits
+
+  actions:
+    sort_requirements_txt: true
+    deduplicate_requirements: true
+    format_json: false            # Risky on large codebases; disabled by default
+    update_gitignore: false       # Don't auto-modify .gitignore
+
+  # Branches where auto-remediation commits are allowed
+  allowed_branches:
+    - main
+    - master
+    - develop
+
+  # Create GitHub issue when drift is detected
+  create_issues: true
+  issue_labels:
+    - drift-detected
+    - automated
+  close_resolved_issues: true
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Notification Settings
+# ─────────────────────────────────────────────────────────────────────────────
+notifications:
+  pr_comment:
+    enabled: true
+    on_events:
+      - pull_request
+  github_issues:
+    enabled: true
+    on_events:
+      - push
+      - workflow_dispatch
+  # Slack/Teams webhooks can be added via repository secrets:
+  #   SLACK_WEBHOOK_URL / TEAMS_WEBHOOK_URL
+  slack:
+    enabled: false
+    webhook_secret: SLACK_WEBHOOK_URL
+  teams:
+    enabled: false
+    webhook_secret: TEAMS_WEBHOOK_URL
