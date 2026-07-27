@@ -139,6 +139,26 @@ vercel env pull                                    # pulls VERCEL_OIDC_TOKEN loc
 Then in code: `vercel_connect.get_token("github/acme-github")` returns a scoped
 token (or `None` when `VERCEL_OIDC_TOKEN` is unset — safe by default).
 
+### Vercel Connect bypass mode (local dev / CI fallback)
+
+If you need to run without Vercel CLI auth, GitHub OAuth, or `VERCEL_OIDC_TOKEN`,
+you can explicitly bypass Vercel Connect:
+
+```bash
+export VERCEL_CONNECT_BYPASS=true
+export GITHUB_TOKEN_FALLBACK=ghp_xxx
+```
+
+With bypass enabled, `src/vercel_connect.py`:
+
+- skips the Vercel Connect API call entirely (no network exchange),
+- returns `GITHUB_TOKEN_FALLBACK` from `get_token(...)`,
+- logs warnings that bypass mode is active,
+- returns `None` (fail-safe) if `GITHUB_TOKEN_FALLBACK` is not set.
+
+Disable bypass by unsetting `VERCEL_CONNECT_BYPASS` (or setting it to `false`)
+to restore normal OIDC exchange behavior.
+
 ### Infrastructure variables
 
 - `DATABASE_URL` - PostgreSQL connection string

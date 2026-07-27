@@ -38,6 +38,11 @@ logger = logging.getLogger(__name__)
 API_BASE = os.getenv("VERCEL_CONNECT_API_BASE", "https://api.vercel.com/v1/connect/token")
 
 
+def bypass_enabled() -> bool:
+    """True when Vercel Connect exchange is explicitly bypassed."""
+    return os.getenv("VERCEL_CONNECT_BYPASS", "").strip().lower() in {"1", "true", "yes", "on"}
+
+
 def oidc_token() -> Optional[str]:
     """Return the project's Vercel OIDC token, if present."""
     return os.getenv("VERCEL_OIDC_TOKEN")
@@ -82,6 +87,16 @@ def get_token(
         The scoped token string, or ``None`` if unconfigured or the exchange
         fails (never raises).
     """
+    if bypass_enabled():
+        logger.warning(
+            "VERCEL_CONNECT_BYPASS is enabled; returning GITHUB_TOKEN_FALLBACK and skipping Vercel Connect exchange."
+        )
+        fallback = os.getenv("GITHUB_TOKEN_FALLBACK")
+        if not fallback:
+            logger.warning("VERCEL_CONNECT_BYPASS is enabled but GITHUB_TOKEN_FALLBACK is unset.")
+            return None
+        return fallback
+
     oidc = oidc_token()
     if not oidc or not connector:
         return None
