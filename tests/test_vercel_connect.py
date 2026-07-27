@@ -8,6 +8,8 @@ from src import vercel_connect
 @pytest.fixture(autouse=True)
 def _clean(monkeypatch):
     monkeypatch.delenv("VERCEL_OIDC_TOKEN", raising=False)
+    monkeypatch.delenv("VERCEL_CONNECT_BYPASS", raising=False)
+    monkeypatch.delenv("GITHUB_TOKEN_FALLBACK", raising=False)
     yield
 
 
@@ -66,3 +68,23 @@ def test_get_token_swallows_request_errors(monkeypatch):
 
     monkeypatch.setattr(vercel_connect, "_request", boom)
     assert vercel_connect.get_token("github/acme-github") is None
+
+
+def test_get_token_bypass_returns_fallback_without_network(monkeypatch, caplog):
+    monkeypatch.setenv("VERCEL_CONNECT_BYPASS", "true")
+    monkeypatch.setenv("GITHUB_TOKEN_FALLBACK", "ghp_fallback_123")
+
+    def should_not_run(*args, **kwargs):
+        raise AssertionError("network should not be called in bypass mode")
+
+    monkeypatch.setattr(vercel_connect, "_request", should_not_run)
+
+    token = vercel_connect.get_token("github/acme-github")
+    assert token == "ghp_fallback_123"
+    assert "VERCEL_CONNECT_BYPASS is enabled" in caplog.text
+
+
+def test_get_token_bypass_returns_none_when_no_fallback(monkeypatch, caplog):
+    monkeypatch.setenv("VERCEL_CONNECT_BYPASS", "true")
+    assert vercel_connect.get_token("github/acme-github") is None
+    assert "GITHUB_TOKEN_FALLBACK is unset" in caplog.text
