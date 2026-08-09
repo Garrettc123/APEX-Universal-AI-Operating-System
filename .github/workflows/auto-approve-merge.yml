@@ -17,11 +17,13 @@ jobs:
     if: github.event.pull_request || github.event.workflow_run.conclusion == 'success'
     steps:
       - name: Approve PR
+        if: github.event_name == 'pull_request'
         uses: hmarr/auto-approve-action@v3
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Auto Merge PR
+        if: github.event_name == 'pull_request'
         uses: pascalgn/automerge-action@v0.15.6
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
