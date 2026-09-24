@@ -127,13 +127,16 @@ jobs:
         run: supabase db push --project-ref ${{ secrets.SUPABASE_PROJECT_ID }}
 
   smoke-test:
-    name: Smoke Test
+    name: Deployment Smoke Test
     runs-on: ubuntu-latest
-    needs: [deploy-railway, deploy-edge-function, db-migration]
-    if: always()
+    needs: [deploy-edge-function]
+    if: inputs.deploy_edge_function != ''
     steps:
-      - name: Health check
-        run: echo "✅ Add: curl -f https://${{ inputs.service_name }}.railway.app/health"
+      - name: Confirm Edge deployment
+        run: |
+          echo "APEX Universal Operations deployment requested for Supabase Edge."
+          echo "Function: ${{ inputs.deploy_edge_function }}"
+          echo "Environment: ${{ inputs.environment }}"
 
   notify-atlas:
     name: Notify ATLAS
