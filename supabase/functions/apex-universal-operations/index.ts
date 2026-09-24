@@ -88,22 +88,22 @@ Deno.serve(async (req: Request) => {
     const url = new URL(req.url);
     const path = url.pathname.replace(/\/+$/, "");
 
-    const user = await requireUser(req);
-    if (!user) return json({ error: "authenticated_user_required" }, 401);
-
-    const member = await requireTenantMember(user.id);
-    if (!member) return json({ error: "tenant_membership_required" }, 403);
-
+    // Public liveness probe. All operational and mutation routes remain authenticated below.
     if (req.method === "GET" && path.endsWith("/health")) {
       return json({
         ok: true,
         status: "healthy",
         service: "apex-universal-operations",
         deployment: "supabase-edge",
-        tenant_id: TENANT_ID,
         governance: "crf + edge-control",
       });
     }
+
+    const user = await requireUser(req);
+    if (!user) return json({ error: "authenticated_user_required" }, 401);
+
+    const member = await requireTenantMember(user.id);
+    if (!member) return json({ error: "tenant_membership_required" }, 403);
 
     if (req.method === "GET" && (path.endsWith("/api/status") || path.endsWith("/status"))) {
       const [systems, workflows, opportunities, runs, failures, control] = await Promise.all([
