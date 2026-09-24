@@ -1,41 +1,42 @@
 # .github/workflows/deploy.yml
-# Caller for the Garcar reusable deploy pipeline.
-#
-# SAFE BY DEFAULT: triggers on manual dispatch only (no push) and calls the
-# LOCAL reusable workflow, so it does not depend on an external garcar-workflows
-# repo and never fires unexpectedly. To enable continuous deploys, add a
-# `push: { branches: [main] }` trigger and set the secrets below. For a
-# multi-repo setup, switch `uses:` to:
-#   Garrettc123/garcar-workflows/.github/workflows/garcar-deploy.yml@main
+# APEX Universal Operations — production deploy
+# Supabase Edge is the canonical deployment target.
 
-name: Deploy
+name: Deploy APEX Universal Operations
+
 on:
+  push:
+    branches: [main]
+    paths:
+      - "supabase/functions/apex-universal-operations/**"
+      - ".github/workflows/deploy.yml"
+      - ".github/workflows/garcar-deploy.yml"
   workflow_dispatch:
     inputs:
       environment:
         description: Target environment
         default: production
         type: choice
-        options: [production, staging, preview]
+        options: [production]
 
 jobs:
   deploy:
     uses: ./.github/workflows/garcar-deploy.yml
     with:
-      service_name: apex-ai-os            # ← Change per repo
+      service_name: apex-universal-operations
       environment: ${{ github.event.inputs.environment || 'production' }}
-      railway_service_id: ""              # ← Set to Railway service UUID to enable Railway deploy
-      deploy_edge_function: ""            # ← Set to 'atlas-ingest' for edge function repos
-      run_schema_migration: false         # ← true for the schema-owning repo only
+      railway_service_id: ""
+      deploy_edge_function: "apex-universal-operations"
+      run_schema_migration: false
       notify_atlas: true
     secrets:
-      RAILWAY_TOKEN:         ${{ secrets.RAILWAY_TOKEN }}
+      RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
       SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
-      SUPABASE_PROJECT_ID:   ${{ secrets.SUPABASE_PROJECT_ID }}
-      SUPABASE_DB_URL:       ${{ secrets.SUPABASE_DB_URL }}
-      ATLAS_INGEST_URL:      ${{ secrets.ATLAS_INGEST_URL }}
-      ATLAS_API_KEY:         ${{ secrets.ATLAS_API_KEY }}
-      ECR_REGISTRY:          ${{ secrets.ECR_REGISTRY }}
-      AWS_ACCESS_KEY_ID:     ${{ secrets.AWS_ACCESS_KEY_ID }}
+      SUPABASE_PROJECT_ID: ${{ secrets.SUPABASE_PROJECT_ID }}
+      SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+      ATLAS_INGEST_URL: ${{ secrets.ATLAS_INGEST_URL }}
+      ATLAS_API_KEY: ${{ secrets.ATLAS_API_KEY }}
+      ECR_REGISTRY: ${{ secrets.ECR_REGISTRY }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
       AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-      AWS_REGION:            ${{ secrets.AWS_REGION }}
+      AWS_REGION: ${{ secrets.AWS_REGION }}
